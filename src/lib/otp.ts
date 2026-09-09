@@ -1,13 +1,6 @@
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
-
-type Provider = "development" | "supabase" | "twilio";
-
-function provider(): Provider {
-  const value = process.env.OTP_PROVIDER ?? "development";
-  if (value === "development" || value === "supabase" || value === "twilio") return value;
-  throw new Error(`Unsupported OTP_PROVIDER: ${value}`);
-}
+import { requireOtpProviderConfiguration } from "@/lib/runtime-config";
 
 async function expectProviderSuccess(response: Response, providerName: string) {
   if (response.ok) return;
@@ -16,9 +9,8 @@ async function expectProviderSuccess(response: Response, providerName: string) {
 }
 
 export async function sendOtp(phone: string, requestIp: string) {
-  const selected = provider();
+  const selected = requireOtpProviderConfiguration();
   if (selected === "development") {
-    if (process.env.NODE_ENV === "production") throw new Error("Development OTP is disabled in production");
     const code = process.env.DEV_OTP ?? "123456";
     await db.employeeOtp.create({
       data: {
@@ -60,9 +52,8 @@ export async function sendOtp(phone: string, requestIp: string) {
 }
 
 export async function verifyOtp(phone: string, code: string) {
-  const selected = provider();
+  const selected = requireOtpProviderConfiguration();
   if (selected === "development") {
-    if (process.env.NODE_ENV === "production") throw new Error("Development OTP is disabled in production");
     const record = await db.employeeOtp.findFirst({
       where: { phone, expiresAt: { gt: new Date() }, verifiedAt: null },
       orderBy: { createdAt: "desc" },

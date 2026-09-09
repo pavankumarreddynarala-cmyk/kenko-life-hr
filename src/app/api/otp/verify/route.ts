@@ -4,23 +4,44 @@ import { signPhoneVerification, signSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { verifyOtp } from "@/lib/otp";
 import { phoneSchema } from "@/lib/validators";
+import { otpErrorResponse } from "@/lib/otp-response";
+import { requireDatabaseConfiguration, requireOtpProviderConfiguration } from "@/lib/runtime-config";
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const parsedPhone = phoneSchema.safeParse(body.phone);
-  if (!parsedPhone.success || !/^\d{4,8}$/.test(String(body.otp ?? ""))) {
-    return NextResponse.json({ error: "Enter a valid mobile number and OTP" }, { status: 400 });
-  }
-  const phone = parsedPhone.data;
   try {
-    if (!(await verifyOtp(phone, String(body.otp)))) {
-      await audit({ actorId: phone, module: "AUTH", recordType: "EmployeePhone", recordId: phone, action: "OTP_FAILED" });
-      return NextResponse.json({ error: "Invalid or expired OTP" }, { status: 401 });
+    const body = await req.json();
+    const parsedPhone = phoneSchema.safeParse(body.phone);
+    if (!parsedPhone.success || !/^\d{4,8}$/.test(String(body.otp ?? ""))) {
+      return NextResponse.json(
+        { error: "Enter a valid Indian mobile number and OTP.", code: "INVALID_OTP_INPUT" },
+        { status: 400 },
+      );
     }
+
+    requireDatabaseConfiguration();
+    requireOtpProviderConfiguration();
+    const phone = parsedPhone.data;
+    if (!(await verifyOtp(phone, String(body.otp)))) {
+      await audit({
+        actorId: phone,
+        module: "AUTH",
+        recordType: "EmployeePhone",
+        recordId: phone,
+        action: "OTP_FAILED",
+      });
+      return NextResponse.json(
+        { error: "Invalid or expired OTP.", code: "OTP_INVALID_OR_EXPIRED" },
+        { status: 401 },
+      );
+    }
+
     const employee = await db.employee.findUnique({ where: { phone }, include: { user: true } });
     const response = NextResponse.json({
       isNew: !employee,
-      employee: employee ? { id: employee.id, permanentId: employee.permanentId, name: employee.name } : null,
+      phone,
+      employee: employee
+        ? { id: employee.id, permanentId: employee.permanentId, name: employee.name }
+        : null,
     });
     response.cookies.set("kenko_phone_verified", signPhoneVerification(phone), {
       httpOnly: true,
@@ -58,7 +79,6 @@ export async function POST(req: NextRequest) {
     });
     return response;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to verify OTP";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return otpErrorResponse(error, "Unable to verify OTP. Please try again or contact an administrator.");
   }
 }

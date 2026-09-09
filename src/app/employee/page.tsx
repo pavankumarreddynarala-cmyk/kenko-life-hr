@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FilterableTable, TableColumn } from "@/components/filterable-table";
 import { INDIAN_STATES_AND_UTS } from "@/lib/validators";
+import { ApiRequestError, requestJson } from "@/lib/client-api";
 
 type Asset = {
   id: string;
@@ -43,16 +44,6 @@ type EmployeeSelf = {
 };
 type RequestRow = Transfer & { id: string; transferId: string; direction: "Outgoing" | "Incoming" };
 
-function normalizedPhone(value: string) {
-  const digits = value.replace(/\D/g, "");
-  const national = digits.length === 12 && digits.startsWith("91")
-    ? digits.slice(2)
-    : digits.length === 11 && digits.startsWith("0")
-      ? digits.slice(1)
-      : digits;
-  return `+91${national}`;
-}
-
 function date(value: string) {
   return new Date(value).toLocaleDateString("en-IN");
 }
@@ -63,6 +54,7 @@ export default function EmployeePortalPage() {
   const [stage, setStage] = useState<"phone" | "otp" | "onboarding" | "portal">("phone");
   const [tab, setTab] = useState<"assets" | "requests">("assets");
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState<"send" | "verify" | "onboarding" | "request" | "resolve" | null>(null);
   const [employee, setEmployee] = useState<EmployeeSelf | null>(null);
   const [requestingAsset, setRequestingAsset] = useState<Asset | null>(null);
   const [request, setRequest] = useState({ receiverEmployeeCode: "", reason: "" });
@@ -80,12 +72,18 @@ export default function EmployeePortalPage() {
   });
 
   const loadSelf = useCallback(async () => {
-    const response = await fetch("/api/employee/self", { cache: "no-store" });
-    const body = await response.json();
-    if (!response.ok) return false;
-    setEmployee(body.employee);
-    setStage("portal");
-    return true;
+    try {
+      const body = await requestJson<{ employee: EmployeeSelf }>("/api/employee/self", {
+        cache: "no-store",
+      });
+      setEmployee(body.employee);
+      setStage("portal");
+      return true;
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 401) return false;
+      setMessage(error instanceof Error ? error.message : "Unable to load the employee portal.");
+      return false;
+    }
   }, []);
 
   useEffect(() => {
@@ -94,72 +92,101 @@ export default function EmployeePortalPage() {
 
   async function send() {
     setMessage("");
-    const response = await fetch("/api/otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone }),
-    });
-    const body = await response.json();
-    setMessage(body.message ?? body.error);
-    if (response.ok) setStage("otp");
+    setBusy("send");
+    try {
+      const body = await requestJson<{ message: string; phone: string }>("/api/otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      setPhone(body.phone);
+      setMessage(body.message);
+      setStage("otp");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to send OTP.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function verify() {
     setMessage("");
-    const response = await fetch("/api/otp/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, otp }),
-    });
-    const body = await response.json();
-    if (!response.ok) return setMessage(body.error);
-    if (body.isNew) {
-      setForm((current) => ({ ...current, phone: normalizedPhone(phone) }));
-      setStage("onboarding");
-      setMessage("Mobile verified. Complete your employee profile.");
-    } else {
-      await loadSelf();
+    setBusy("verify");
+    try {
+      const body = await requestJson<{ isNew: boolean; phone: string }>("/api/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, otp }),
+      });
+      setPhone(body.phone);
+      if (body.isNew) {
+        setForm((current) => ({ ...current, phone: body.phone }));
+        setStage("onboarding");
+        setMessage("Mobile verified. Complete your employee profile.");
+      } else {
+        await loadSelf();
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to verify OTP.");
+    } finally {
+      setBusy(null);
     }
   }
 
   async function saveOnboarding() {
     setMessage("");
-    const response = await fetch("/api/employee/self", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const body = await response.json();
-    if (!response.ok) return setMessage(body.error);
-    setMessage(`Welcome. Your Employee ID is ${body.employee.permanentId}.`);
-    await loadSelf();
+    setBusy("onboarding");
+    try {
+      const body = await requestJson<{ employee: EmployeeSelf }>("/api/employee/self", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      setMessage(`Welcome. Your Employee ID is ${body.employee.permanentId}.`);
+      await loadSelf();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to complete onboarding.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function createRequest() {
     if (!requestingAsset) return;
-    const response = await fetch("/api/transfers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assetId: requestingAsset.id, ...request }),
-    });
-    const body = await response.json();
-    if (!response.ok) return setMessage(body.error);
-    setRequestingAsset(null);
-    setRequest({ receiverEmployeeCode: "", reason: "" });
-    setMessage("Transfer request sent to the receiving employee.");
-    await loadSelf();
-    setTab("requests");
+    setBusy("request");
+    try {
+      await requestJson("/api/transfers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetId: requestingAsset.id, ...request }),
+      });
+      setRequestingAsset(null);
+      setRequest({ receiverEmployeeCode: "", reason: "" });
+      setMessage("Transfer request sent to the receiving employee.");
+      await loadSelf();
+      setTab("requests");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to send the transfer request.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   const resolveRequest = useCallback(async (transferId: string, action: "ACCEPT" | "REJECT" | "REVOKE") => {
-    const response = await fetch(`/api/transfers/${transferId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    const body = await response.json();
-    setMessage(response.ok ? `Request ${action.toLowerCase()}ed.` : body.error);
-    if (response.ok) await loadSelf();
+    setBusy("resolve");
+    try {
+      await requestJson(`/api/transfers/${transferId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      setMessage(`Request ${action.toLowerCase()}ed.`);
+      await loadSelf();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update the request.");
+    } finally {
+      setBusy(null);
+    }
   }, [loadSelf]);
 
   const assetRows = useMemo(() => employee?.assignments.map((assignment) => assignment.asset) ?? [], [employee]);
@@ -231,14 +258,15 @@ export default function EmployeePortalPage() {
           {stage === "phone" && (
             <div className="mt-6 space-y-3">
               <label className="text-sm font-medium">Mobile number</label>
-              <input className="input" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+919876543210" />
-              <button className="btn-primary w-full" onClick={send}>Send OTP</button>
+              <input autoComplete="tel" className="input" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="9876543210 or +919876543210" />
+              <p className="text-xs text-stone-500">Indian mobile numbers are normalized to the +91 format.</p>
+              <button className="btn-primary w-full disabled:opacity-60" disabled={busy !== null} onClick={send}>{busy === "send" ? "Sending…" : "Send OTP"}</button>
             </div>
           )}
           {stage === "otp" && (
             <div className="mt-6 space-y-3">
               <input className="input" inputMode="numeric" value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="Enter OTP" />
-              <button className="btn-primary w-full" onClick={verify}>Verify securely</button>
+              <button className="btn-primary w-full disabled:opacity-60" disabled={busy !== null} onClick={verify}>{busy === "verify" ? "Verifying…" : "Verify securely"}</button>
               <button className="w-full text-sm text-stone-500 underline" onClick={() => setStage("phone")}>Use another number</button>
             </div>
           )}
@@ -266,10 +294,10 @@ export default function EmployeePortalPage() {
                   {INDIAN_STATES_AND_UTS.map((state) => <option key={state}>{state}</option>)}
                 </select>
               </label>
-              <button className="btn-primary sm:col-span-2" onClick={saveOnboarding}>Complete onboarding</button>
+              <button className="btn-primary sm:col-span-2 disabled:opacity-60" disabled={busy !== null} onClick={saveOnboarding}>{busy === "onboarding" ? "Saving…" : "Complete onboarding"}</button>
             </div>
           )}
-          {message && <p className="mt-4 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">{message}</p>}
+          {message && <p aria-live="polite" className="mt-4 rounded-lg bg-orange-50 p-3 text-sm text-orange-900" role="alert">{message}</p>}
         </div>
       </main>
     );
@@ -297,7 +325,7 @@ export default function EmployeePortalPage() {
             <FilterableTable rows={requestRows} columns={requestColumns} emptyMessage="No incoming or outgoing transfer requests." />
           )}
         </section>
-        {message && <p className="mt-4 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">{message}</p>}
+        {message && <p aria-live="polite" className="mt-4 rounded-lg bg-orange-50 p-3 text-sm text-orange-900" role="alert">{message}</p>}
       </div>
       {requestingAsset && (
         <div className="fixed inset-0 z-50 bg-black/40 p-4">
@@ -319,7 +347,7 @@ export default function EmployeePortalPage() {
             </label>
             <div className="mt-5 flex justify-end gap-3">
               <button className="btn" onClick={() => setRequestingAsset(null)}>Cancel</button>
-              <button className="btn-primary" onClick={createRequest}>Send request</button>
+              <button className="btn-primary disabled:opacity-60" disabled={busy !== null} onClick={createRequest}>{busy === "request" ? "Sending…" : "Send request"}</button>
             </div>
           </section>
         </div>

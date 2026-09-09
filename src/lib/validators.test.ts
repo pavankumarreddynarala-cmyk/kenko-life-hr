@@ -17,6 +17,7 @@ const validOnboarding = {
 describe("Indian employee validation", () => {
   it("normalizes a ten-digit mobile number to E.164", () => {
     expect(phoneSchema.parse("98765 43210")).toBe("+919876543210");
+    expect(phoneSchema.parse("6300277087")).toBe("+916300277087");
   });
 
   it("rejects non-Indian and invalid Indian mobile prefixes", () => {
