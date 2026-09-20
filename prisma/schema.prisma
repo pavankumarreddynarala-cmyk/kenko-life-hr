@@ -1,0 +1,504 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String?
+  role          Role
+  employeeId    String?        @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @default(now()) @updatedAt
+  notifications Notification[]
+  employee      Employee?      @relation(fields: [employeeId], references: [id])
+}
+
+model Employee {
+  id                  String             @id @default(cuid())
+  permanentId         String             @unique @default(dbgenerated("('EMP'::text || lpad((nextval('employee_code_seq'::regclass))::text, 4, '0'::text))"))
+  dynamicId           String?            @unique
+  teamOfficeCode      String?
+  name                String
+  phone               String             @unique
+  email               String?            @unique
+  personalEmail       String?            @unique
+  fatherName          String?
+  gender              Gender?
+  dateOfBirth         DateTime?
+  pan                 String?            @unique
+  aadhaar             String?            @unique
+  address1            String?
+  address2            String?
+  pinCode             String?
+  state               String?
+  bankHolderName      String?
+  bankName            String?
+  accountNumber       String?
+  ifscCode            String?
+  pfEligible          Boolean            @default(false)
+  pfAccountNumber     String?
+  uanNumber           String?
+  esicNumber          String?
+  numberOfOutlets     Int?
+  companyId           String?
+  locationId          String?
+  cityId              String?
+  branchId            String?
+  outletModelId       String?
+  specialBranchCodeId String?
+  departmentId        String?
+  employeeRoleId      String?
+  designationId       String?
+  costCentreId        String?
+  status              EmploymentStatus   @default(ACTIVE)
+  joiningDate         DateTime?
+  exitDate            DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @default(now()) @updatedAt
+  deletedAt           DateTime?
+  assignments         AssetAssignment[]
+  receivedTransfers   AssetTransfer[]    @relation("receiver")
+  sentTransfers       AssetTransfer[]    @relation("sender")
+  branch              Branch?            @relation(fields: [branchId], references: [id])
+  city                City?              @relation(fields: [cityId], references: [id])
+  company             Company?           @relation(fields: [companyId], references: [id])
+  costCentre          CostCentre?        @relation(fields: [costCentreId], references: [id])
+  department          Department?        @relation(fields: [departmentId], references: [id])
+  designation         Designation?       @relation(fields: [designationId], references: [id])
+  employeeRole        EmployeeRole?      @relation(fields: [employeeRoleId], references: [id])
+  location            Location?          @relation(fields: [locationId], references: [id])
+  outletModel         OutletModel?       @relation(fields: [outletModelId], references: [id])
+  specialBranchCode   SpecialBranchCode? @relation(fields: [specialBranchCodeId], references: [id])
+  history             EmployeeHistory[]
+  user                User?
+
+  @@index([name])
+  @@index([phone])
+  @@index([departmentId])
+  @@index([cityId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model Company {
+  id        String       @id @default(cuid())
+  name      String       @unique
+  code      String       @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @default(now()) @updatedAt
+  employees Employee[]
+  assets    FixedAsset[]
+}
+
+model Location {
+  id        String       @id @default(cuid())
+  name      String       @unique
+  code      String       @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @default(now()) @updatedAt
+  employees Employee[]
+  assets    FixedAsset[]
+}
+
+model City {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @default(now()) @updatedAt
+  branches  Branch[]
+  employees Employee[]
+}
+
+model Branch {
+  id           String              @id @default(cuid())
+  name         String              @unique
+  code         String              @unique
+  cityId       String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @default(now()) @updatedAt
+  city         City?               @relation(fields: [cityId], references: [id])
+  employees    Employee[]
+  specialCodes SpecialBranchCode[]
+}
+
+model OutletModel {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @default(now()) @updatedAt
+  employees Employee[]
+}
+
+model SpecialBranchCode {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @unique
+  branchId  String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @default(now()) @updatedAt
+  employees Employee[]
+  branch    Branch?    @relation(fields: [branchId], references: [id])
+}
+
+model Department {
+  id        String       @id @default(cuid())
+  name      String       @unique
+  code      String       @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @default(now()) @updatedAt
+  employees Employee[]
+  assets    FixedAsset[]
+}
+
+model EmployeeRole {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @default(now()) @updatedAt
+  employees Employee[]
+}
+
+model Designation {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @default(now()) @updatedAt
+  employees Employee[]
+}
+
+model CostCentre {
+  id        String       @id @default(cuid())
+  name      String       @unique
+  code      String       @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @default(now()) @updatedAt
+  employees Employee[]
+  assets    FixedAsset[]
+}
+
+model CustomMasterType {
+  id        String              @id @default(cuid())
+  name      String              @unique
+  code      String              @unique
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  values    CustomMasterValue[]
+}
+
+model CustomMasterValue {
+  id        String           @id @default(cuid())
+  typeId    String
+  name      String
+  code      String
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  type      CustomMasterType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+
+  @@unique([typeId, code])
+  @@index([typeId])
+}
+
+model EmployeeHistory {
+  id         String   @id @default(cuid())
+  employeeId String
+  snapshot   Json
+  reason     String?
+  createdAt  DateTime @default(now())
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, createdAt])
+}
+
+model EmployeeOtp {
+  id         String    @id @default(cuid())
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  verifiedAt DateTime?
+  requestIp  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([email, expiresAt])
+  @@index([requestIp, createdAt])
+}
+
+model FixedAsset {
+  id                    String              @id @default(cuid())
+  faId                  String              @unique
+  category              String
+  description           String
+  makeModel             String?
+  serialNo              String?             @unique
+  vendorName            String?
+  invoiceNo             String?
+  invoiceDate           DateTime?
+  capitalisationDate    DateTime?
+  poGrnNo               String?
+  locationId            String?
+  departmentId          String?
+  costCentreId          String?
+  purchaseCost          Decimal             @default(0) @db.Decimal(15, 2)
+  freight               Decimal             @default(0) @db.Decimal(15, 2)
+  installationCost      Decimal             @default(0) @db.Decimal(15, 2)
+  otherCost             Decimal             @default(0) @db.Decimal(15, 2)
+  totalCapitalisedCost  Decimal             @default(0) @db.Decimal(15, 2)
+  gstAmount             Decimal             @default(0) @db.Decimal(15, 2)
+  itcEligible           Boolean             @default(false)
+  itcAvailed            Decimal             @default(0) @db.Decimal(15, 2)
+  usefulLife            Int?
+  residualValue         Decimal             @default(0) @db.Decimal(15, 2)
+  openingGrossBlock     Decimal             @default(0) @db.Decimal(15, 2)
+  additions             Decimal             @default(0) @db.Decimal(15, 2)
+  disposals             Decimal             @default(0) @db.Decimal(15, 2)
+  closingGrossBlock     Decimal             @default(0) @db.Decimal(15, 2)
+  openingAccumDep       Decimal             @default(0) @db.Decimal(15, 2)
+  depreciationYear      Decimal             @default(0) @db.Decimal(15, 2)
+  accumDepDisposal      Decimal             @default(0) @db.Decimal(15, 2)
+  closingAccumDep       Decimal             @default(0) @db.Decimal(15, 2)
+  netBookValue          Decimal             @default(0) @db.Decimal(15, 2)
+  taxBlock              String?
+  openingWdv            Decimal             @default(0) @db.Decimal(15, 2)
+  taxAdditions          Decimal             @default(0) @db.Decimal(15, 2)
+  taxDisposals          Decimal             @default(0) @db.Decimal(15, 2)
+  wdvBeforeDepreciation Decimal             @default(0) @db.Decimal(15, 2)
+  taxRate               Decimal             @default(0) @db.Decimal(7, 2)
+  taxDepreciation       Decimal             @default(0) @db.Decimal(15, 2)
+  closingWdv            Decimal             @default(0) @db.Decimal(15, 2)
+  disposalDate          DateTime?
+  saleProceeds          Decimal             @default(0) @db.Decimal(15, 2)
+  profitLossOnDisposal  Decimal             @default(0) @db.Decimal(15, 2)
+  verificationDate      DateTime?
+  verificationStatus    String?
+  status                AssetStatus         @default(AVAILABLE)
+  companyId             String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @default(now()) @updatedAt
+  depreciationMethod    DepreciationMethod?
+  disposalReason        DisposalReason?
+  disposalRemarks       String?
+  assignments           AssetAssignment[]
+  qr                    AssetQRCode?
+  transfers             AssetTransfer[]
+  company               Company?            @relation(fields: [companyId], references: [id])
+  costCentre            CostCentre?         @relation(fields: [costCentreId], references: [id])
+  department            Department?         @relation(fields: [departmentId], references: [id])
+  location              Location?           @relation(fields: [locationId], references: [id])
+
+  @@index([status, category])
+  @@index([locationId])
+  @@index([departmentId])
+}
+
+model AssetAssignment {
+  id            String        @id @default(cuid())
+  assetId       String
+  custodianType CustodianType
+  employeeId    String?
+  custodianName String?
+  assignedAt    DateTime      @default(now())
+  returnedAt    DateTime?
+  notes         String?
+  asset         FixedAsset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  employee      Employee?     @relation(fields: [employeeId], references: [id])
+
+  @@index([assetId, returnedAt])
+  @@index([employeeId, returnedAt])
+}
+
+model AssetTransfer {
+  id             String               @id @default(cuid())
+  assetId        String
+  senderId       String?
+  receiverId     String
+  kind           TransferKind
+  status         TransferStatus       @default(PENDING)
+  reason         String?
+  effectiveDate  DateTime
+  registeredDate DateTime             @default(now())
+  resolvedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @default(now()) @updatedAt
+  asset          FixedAsset           @relation(fields: [assetId], references: [id])
+  receiver       Employee             @relation("receiver", fields: [receiverId], references: [id])
+  sender         Employee?            @relation("sender", fields: [senderId], references: [id])
+  events         AssetTransferEvent[]
+
+  @@index([status, receiverId])
+  @@index([senderId, createdAt])
+  @@index([assetId, createdAt])
+}
+
+model AssetTransferEvent {
+  id         String        @id @default(cuid())
+  transferId String
+  action     String
+  actorId    String?
+  comment    String?
+  createdAt  DateTime      @default(now())
+  transfer   AssetTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+}
+
+model AssetQRCode {
+  id        String     @id @default(cuid())
+  assetId   String     @unique
+  token     String     @unique @default(uuid())
+  createdAt DateTime   @default(now())
+  asset     FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorId       String?
+  email         String?
+  role          Role?
+  module        String
+  recordType    String
+  recordId      String
+  action        String
+  field         String?
+  previousValue Json?
+  newValue      Json?
+  metadata      Json?
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@index([recordType, recordId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([module, createdAt])
+}
+
+model RecordVersion {
+  id         String   @id @default(cuid())
+  recordType String
+  recordId   String
+  version    Int
+  snapshot   Json
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  @@unique([recordType, recordId, version])
+}
+
+model ImportBatch {
+  id         String        @id @default(cuid())
+  type       String
+  status     ImportStatus  @default(VALIDATING)
+  filename   String
+  createdAt  DateTime      @default(now())
+  totalRows  Int           @default(0)
+  validCount Int           @default(0)
+  errorCount Int           @default(0)
+  payload    Json?
+  createdBy  String?
+  errors     ImportError[]
+}
+
+model ImportError {
+  id        String      @id @default(cuid())
+  batchId   String
+  rowNumber Int
+  field     String?
+  message   String
+  raw       Json?
+  batch     ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+enum Role {
+  ADMIN
+  HR
+  CFO
+  EMPLOYEE
+  CEO
+  COO
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  EXITED
+  ON_LEAVE
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  PENDING_TRANSFER
+  UNDER_REPAIR
+  DISPOSED
+}
+
+enum CustodianType {
+  EMPLOYEE
+  DEPARTMENT
+  COMPANY
+  IT
+  FINANCE
+  OTHER
+}
+
+enum TransferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REVOKED
+}
+
+enum TransferKind {
+  ADMIN_TRANSFER
+  EMPLOYEE_REQUEST
+}
+
+enum ImportStatus {
+  VALIDATING
+  READY
+  IMPORTED
+  FAILED
+}
+
+enum Gender {
+  FEMALE
+  MALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum DepreciationMethod {
+  SLM
+  WDV
+}
+
+enum DisposalReason {
+  SOLD
+  SCRAPPED
+  LOST
+  DAMAGED
+  WRITTEN_OFF
+  TRANSFERRED
+  OTHER
+}

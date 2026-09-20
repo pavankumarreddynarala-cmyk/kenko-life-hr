@@ -1,0 +1,1 @@
+{ "framework": "nextjs", "regions": ["bom1"], "functions": { "src/app/api/**/*.ts": { "maxDuration": 30 } } }
