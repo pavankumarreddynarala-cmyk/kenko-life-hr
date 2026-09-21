@@ -55,7 +55,7 @@ Use the local-only `DEV_OTP` flow solely for development. For a deployed employe
 1. Sign in as the seeded administrator in the pilot.
 2. Open **Master Data** and create Companies, Locations, Cities, Branches, Departments, Designations, and Cost Centres.
 3. Create management accounts with the intended HR and CFO roles. Do not distribute the seeded account.
-4. Share the employee portal URL `/employee` only after replacing development OTP with Supabase Phone Auth or Twilio Verify.
+4. Share the employee portal URL `/employee/login` only after replacing development OTP with Supabase Phone Auth or Twilio Verify.
 5. All users access the same cloud database. The Master Data module refreshes every 10 seconds; it does not require copying files between computers.
 
 ## Before moving past pilot use

@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { apiError } from "@/lib/api-error";
 
 function escapeXml(value: string) {
   return value.replace(/[<>&'"]/g, (character) => {
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest) {
   try {
     const session = requireRole(req, MANAGEMENT_ROLES);
     const assets = await db.fixedAsset.findMany({
-      where: { qr: { isNot: null } },
+      where: { qr: { isNot: null }, deletedAt: null },
       select: { faId: true, qr: { select: { token: true } } },
       orderBy: { faId: "asc" },
     });
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
         "Content-Disposition": 'attachment; filename="kenko-asset-qr-codes.zip"',
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, "Preparing the QR codes");
   }
 }

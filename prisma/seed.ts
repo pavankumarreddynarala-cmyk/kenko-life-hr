@@ -7,14 +7,15 @@ const db = new PrismaClient();
 
 async function main() {
   const hash = await bcrypt.hash("KenkoDemo!2026", 10);
-  for (const [email, role] of [
-    ["Accounts@thekenkolife.com", "HR"],
-    ["roshini@thekenkolife.com", "CFO"],
-    ["admin@thekenkolife.com", "ADMIN"],
-    ["ceo@thekenkolife.com", "CEO"],
-    ["coo@thekenkolife.com", "COO"],
+  for (const [email, role, name] of [
+    ["Accounts@thekenkolife.com", "HR", "Accounts HR"],
+    ["roshini@thekenkolife.com", "CFO", "Roshini"],
+    ["admin@thekenkolife.com", "ADMIN", "Administrator"],
+    ["ceo@thekenkolife.com", "CEO", "Chief Executive"],
+    ["coo@thekenkolife.com", "COO", "Chief Operating Officer"],
   ] as const) {
-    await db.user.upsert({ where: { email }, update: {}, create: { email, role, passwordHash: hash } });
+    // `name` only fills the sidebar profile; existing users keep whatever they have.
+    await db.user.upsert({ where: { email }, update: {}, create: { email, role, name, passwordHash: hash } });
   }
 
   const company = await db.company.upsert({

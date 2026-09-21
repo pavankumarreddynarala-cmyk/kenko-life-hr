@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
@@ -29,8 +30,8 @@ export default async function AssetQrPage({ params }: { params: Promise<{ token:
             This QR code only shows asset details to signed-in staff or the employee it is assigned to.
           </p>
           <div className="mt-5 flex justify-center gap-3">
-            <a className="btn-primary" href="/login">Management sign in</a>
-            <a className="btn" href="/employee">Employee Portal</a>
+            <Link className="btn-primary" href="/login">Management sign in</Link>
+            <Link className="btn" href="/employee/login">Employee sign in</Link>
           </div>
         </section>
       </main>
@@ -58,6 +59,23 @@ export default async function AssetQrPage({ params }: { params: Promise<{ token:
   });
   if (!qr) return notFound();
   const asset = qr.asset;
+  if (asset.deletedAt) {
+    // A deleted asset is invisible to everyone except management, who see why it was removed.
+    if (!isManagement) return notFound();
+    return (
+      <main className="min-h-screen bg-kenko-cream p-5">
+        <section className="card mx-auto my-10 max-w-lg text-center">
+          <p className="text-xs font-bold tracking-widest text-red-700">DELETED ASSET</p>
+          <h1 className="mt-3 text-2xl font-bold">{asset.faId} was deleted from the register</h1>
+          <p className="mt-2 text-sm text-stone-500">
+            Deleted {display(asset.deletedAt)} by {asset.deletedByEmail ?? "an administrator"}.
+            {asset.deleteReason ? ` Reason: ${asset.deleteReason}.` : ""} An Admin, CEO or COO can restore it from the
+            Asset Register&apos;s deleted list.
+          </p>
+        </section>
+      </main>
+    );
+  }
   const custodian = asset.assignments[0]?.employee;
   const isAssignedEmployee = session.role === "EMPLOYEE" && custodian?.id === session.employeeId;
 

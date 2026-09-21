@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { assetData, deriveAssetComputedFields } from "@/lib/assets";
+import { assertAssetUnique, assertItcRule, assetData, deriveAssetComputedFields } from "@/lib/assets";
 import { computeAssetDepreciation, type DepreciationAssetInput } from "@/lib/depreciation";
 import { apiError } from "@/lib/api-error";
 
@@ -65,7 +65,14 @@ function parsePeriodParams(searchParams: URLSearchParams) {
 export async function GET(req: NextRequest) {
   try {
     requireRole(req, MANAGEMENT_ROLES);
-    const data = await db.fixedAsset.findMany({ include, take: 500, orderBy: { createdAt: "desc" } });
+    // Default view hides deleted assets; ?deleted=1 lists them (deletion history).
+    const wantDeleted = req.nextUrl.searchParams.get("deleted") === "1";
+    const data = await db.fixedAsset.findMany({
+      where: { deletedAt: wantDeleted ? { not: null } : null },
+      include,
+      take: 500,
+      orderBy: wantDeleted ? { deletedAt: "desc" } : { createdAt: "desc" },
+    });
     const period = parsePeriodParams(req.nextUrl.searchParams);
     if (!period) return NextResponse.json({ data });
 
@@ -81,7 +88,7 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json({ data: withDepreciation, period });
   } catch (error) {
-    return apiError(error, "Unable to load assets");
+    return apiError(error, "Loading assets");
   }
 }
 
@@ -89,8 +96,10 @@ export async function POST(req: NextRequest) {
   try {
     const session = requireRole(req, MANAGEMENT_ROLES);
     const rawData = { ...assetData(await req.json(), true), status: "AVAILABLE" as const };
+    assertItcRule({}, rawData);
     const data = { ...rawData, ...deriveAssetComputedFields({}, rawData) };
     const asset = await db.$transaction(async (tx) => {
+      await assertAssetUnique(tx, rawData as { faId?: unknown; serialNo?: unknown });
       const created = await tx.fixedAsset.create({ data: { ...data, qr: { create: {} } } as never, include });
       await audit(
         {
@@ -109,7 +118,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ data: asset }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create asset";
-    return NextResponse.json({ error: message }, { status: 409 });
+    return apiError(error, "Adding the asset");
   }
 }

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import "@/lib/zod-errors";
+import type { Prisma } from "@prisma/client";
+import { AppError, type FieldIssue } from "@/lib/app-error";
+import { fieldLabel } from "@/lib/field-labels";
 import { computeAssetDepreciation, type DepreciationAssetInput } from "@/lib/depreciation";
 
 export const assetDateKeys = ["invoiceDate", "capitalisationDate", "disposalDate", "verificationDate"] as const;
@@ -64,9 +68,9 @@ const DISPOSAL_REASONS = ["SOLD", "SCRAPPED", "LOST", "DAMAGED", "WRITTEN_OFF", 
 
 export const assetSchema = z
   .object({
-    faId: z.string().trim().min(1).max(50),
-    category: z.string().trim().min(1).max(100),
-    description: z.string().trim().min(1).max(300),
+    faId: z.string({ required_error: "Enter an Asset ID (for example FA000123)." }).trim().min(1, "Enter an Asset ID (for example FA000123).").max(50, "Asset ID can be at most 50 characters."),
+    category: z.string({ required_error: "Enter the asset category (for example Laptop or Furniture)." }).trim().min(1, "Enter the asset category (for example Laptop or Furniture).").max(100, "Asset category can be at most 100 characters."),
+    description: z.string({ required_error: "Enter a short description of the asset." }).trim().min(1, "Enter a short description of the asset.").max(300, "Asset description can be at most 300 characters."),
     status: z.enum(["AVAILABLE", "ASSIGNED", "PENDING_TRANSFER", "UNDER_REPAIR", "DISPOSED"]).optional(),
     itcEligible: z.coerce.boolean().optional(),
     depreciationMethod: z.enum(DEPRECIATION_METHODS).nullish(),
@@ -76,7 +80,7 @@ export const assetSchema = z
 
 export function assetData(body: Record<string, unknown>, creating: boolean) {
   const parsed = (creating ? assetSchema : assetSchema.partial()).safeParse(body);
-  if (!parsed.success) throw new Error(parsed.error.issues[0].message);
+  if (!parsed.success) throw parsed.error;
   const data: Record<string, unknown> = {};
   const textKeys = creating ? assetTextKeys : assetTextKeys.filter((key) => key !== "faId");
   for (const key of textKeys) {
@@ -92,7 +96,13 @@ export function assetData(body: Record<string, unknown>, creating: boolean) {
         continue;
       }
       const value = Number(body[key]);
-      if (!Number.isFinite(value) || value < 0) throw new Error(`${key} must be a non-negative number`);
+      if (!Number.isFinite(value) || value < 0) {
+        const label = fieldLabel(key);
+        throw new AppError(
+          `${label}: enter a number that is 0 or more, using digits only (for example 1500 or 1500.50).`,
+          { status: 400, code: "VALIDATION_ERROR", fields: [{ field: key, label, message: "Enter a number that is 0 or more, using digits only." }] },
+        );
+      }
       data[key] = key === "usefulLife" ? Math.trunc(value) : value;
     }
   }
@@ -168,4 +178,66 @@ export function deriveAssetComputedFields(existing: Record<string, unknown>, pat
     closingWdv: tax.closingWdv,
     profitLossOnDisposal: profitLossOnDisposal ?? 0,
   };
+}
+
+function asNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return 0;
+  return typeof value === "object" && "toNumber" in (value as object)
+    ? (value as { toNumber(): number }).toNumber()
+    : Number(value);
+}
+
+export const ITC_NOT_ELIGIBLE_MESSAGE =
+  "ITC Availed must be 0 (or blank) when ITC Eligible is No. Set ITC Eligible to Yes if this asset qualifies for input tax credit, or clear the ITC amount.";
+
+/** The ITC issue in a merged asset record, if any (ITC can only be availed when eligible). */
+export function itcIssue(record: { itcEligible?: unknown; itcAvailed?: unknown }): FieldIssue | null {
+  if (!record.itcEligible && asNumber(record.itcAvailed) > 0) {
+    return { field: "itcAvailed", label: fieldLabel("itcAvailed"), message: ITC_NOT_ELIGIBLE_MESSAGE };
+  }
+  return null;
+}
+
+/**
+ * Enforces "ITC amount only when ITC Eligible = Yes" against the record as it will look
+ * after the write. Only checked when the write touches either ITC field, so unrelated
+ * edits to older rows are not blocked.
+ */
+export function assertItcRule(existing: Record<string, unknown>, patch: Record<string, unknown>) {
+  if (!("itcEligible" in patch) && !("itcAvailed" in patch)) return;
+  const issue = itcIssue({ ...existing, ...patch });
+  if (issue) throw new AppError(issue.message, { status: 400, code: "VALIDATION_ERROR", fields: [issue] });
+}
+
+/** Rejects an Asset ID / Serial No. another asset already uses (deleted assets included). */
+export async function assertAssetUnique(
+  tx: Prisma.TransactionClient,
+  values: { faId?: unknown; serialNo?: unknown },
+  excludeId?: string,
+) {
+  const issues: FieldIssue[] = [];
+  for (const field of ["faId", "serialNo"] as const) {
+    const value = values[field];
+    if (typeof value !== "string" || !value) continue;
+    const holder = await tx.fixedAsset.findFirst({
+      where: { [field]: value, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+      select: { faId: true, description: true, deletedAt: true },
+    });
+    if (!holder) continue;
+    const label = fieldLabel(field);
+    issues.push({
+      field,
+      label,
+      message: `${label} ${value} is already used by asset ${holder.faId} (${holder.description})${
+        holder.deletedAt ? ", which was deleted. Restore that asset from the deleted list or enter a different " + label : ". Enter a different " + label + ", or edit the existing asset instead"
+      }.`,
+    });
+  }
+  if (issues.length) {
+    throw new AppError(issues.map((issue) => issue.message).join(" "), {
+      status: 409,
+      code: "DUPLICATE_VALUE",
+      fields: issues,
+    });
+  }
 }
