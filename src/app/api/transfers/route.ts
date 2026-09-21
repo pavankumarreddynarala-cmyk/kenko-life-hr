@@ -4,50 +4,88 @@ import { getSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { transferRequestSchema } from "@/lib/validators";
 import { assignAsset, transferInclude } from "@/lib/transfers";
+import { apiError, validationError } from "@/lib/api-error";
+import { AppError, notFound, unauthenticated } from "@/lib/app-error";
+import { isManagementRole } from "@/lib/permissions";
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const management = ["ADMIN", "HR", "CFO"].includes(session.role);
-  if (!management && !session.employeeId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const data = await db.assetTransfer.findMany({
-    where: management ? undefined : { OR: [{ senderId: session.employeeId }, { receiverId: session.employeeId }] },
-    include: transferInclude,
-    take: 500,
-    orderBy: { createdAt: "desc" },
-  });
-  return NextResponse.json({ data });
+  try {
+    const session = getSession(req);
+    if (!session) throw unauthenticated();
+    const management = isManagementRole(session.role);
+    if (!management && !session.employeeId) throw unauthenticated();
+    const data = await db.assetTransfer.findMany({
+      where: management
+        ? { asset: { deletedAt: null } }
+        : { OR: [{ senderId: session.employeeId }, { receiverId: session.employeeId }] },
+      include: transferInclude,
+      take: 500,
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json({ data });
+  } catch (error) {
+    return apiError(error, "Loading transfers");
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const parsed = transferRequestSchema.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
-  const management = ["ADMIN", "HR", "CFO"].includes(session.role);
-  if (!management && !session.employeeId) {
-    return NextResponse.json({ error: "Employee authentication required" }, { status: 401 });
-  }
-
   try {
+    const session = getSession(req);
+    if (!session) throw unauthenticated();
+    const parsed = transferRequestSchema.safeParse(await req.json());
+    if (!parsed.success) return validationError(parsed.error);
+    const management = isManagementRole(session.role);
+    if (!management && !session.employeeId) throw unauthenticated();
+
     const transfer = await db.$transaction(async (tx) => {
       const receiver = await tx.employee.findUnique({ where: { permanentId: parsed.data.receiverEmployeeCode } });
-      if (!receiver) throw new Error("Receiving Employee ID was not found");
+      if (!receiver || receiver.deletedAt) {
+        throw new AppError(
+          `Receiving Employee ID: no active employee has the ID ${parsed.data.receiverEmployeeCode}. Check the ID in the Employee Master and enter it again.`,
+          {
+            status: 404,
+            code: "NOT_FOUND",
+            fields: [{ field: "receiverEmployeeCode", label: "Receiving Employee ID", message: "No active employee has this ID." }],
+          },
+        );
+      }
       const asset = await tx.fixedAsset.findUnique({ where: { id: parsed.data.assetId } });
-      if (!asset) throw new Error("Asset was not found in the register");
-      if (asset.status === "DISPOSED") throw new Error("Disposed assets cannot be transferred");
+      if (!asset || asset.deletedAt) throw notFound("This asset");
+      if (asset.status === "DISPOSED") {
+        throw new AppError(`Asset ${asset.faId} is disposed and cannot be transferred. Choose an active asset.`, {
+          status: 409,
+          code: "ASSET_DISPOSED",
+        });
+      }
       const activeAssignment = await tx.assetAssignment.findFirst({
         where: { assetId: parsed.data.assetId, returnedAt: null },
       });
       const senderId = management ? activeAssignment?.employeeId : session.employeeId;
       if (!management && activeAssignment?.employeeId !== session.employeeId) {
-        throw new Error("You do not currently hold this asset");
+        throw new AppError(`You cannot transfer asset ${asset.faId} because it is not currently assigned to you.`, {
+          status: 403,
+          code: "FORBIDDEN",
+        });
       }
-      if (senderId === receiver.id) throw new Error("The asset is already assigned to this employee");
+      if (senderId === receiver.id) {
+        throw new AppError(
+          `Asset ${asset.faId} is already assigned to ${receiver.permanentId} (${receiver.name}). Choose a different receiving employee.`,
+          {
+            status: 409,
+            code: "CONFLICT",
+            fields: [{ field: "receiverEmployeeCode", label: "Receiving Employee ID", message: "The asset is already with this employee." }],
+          },
+        );
+      }
       const pending = await tx.assetTransfer.findFirst({
         where: { assetId: parsed.data.assetId, status: "PENDING" },
       });
-      if (pending) throw new Error("This asset already has a pending transfer request");
+      if (pending) {
+        throw new AppError(
+          `Asset ${asset.faId} already has a transfer request waiting for a decision. Approve, decline or revoke it on the Transfers page before starting another.`,
+          { status: 409, code: "CONFLICT" },
+        );
+      }
 
       const effectiveDate = parsed.data.effectiveDate ?? new Date();
       const registeredDate = parsed.data.registeredDate ?? new Date();
@@ -101,7 +139,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ data: transfer }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create transfer";
-    return NextResponse.json({ error: message }, { status: 409 });
+    return apiError(error, "Creating the transfer");
   }
 }

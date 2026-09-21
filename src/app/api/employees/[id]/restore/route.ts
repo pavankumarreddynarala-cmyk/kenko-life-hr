@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { employeeInclude } from "@/lib/employees";
+import { apiError } from "@/lib/api-error";
+import { AppError, notFound } from "@/lib/app-error";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,9 +13,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const employee = await db.$transaction(async (tx) => {
       const before = await tx.employee.findUnique({ where: { id }, include: employeeInclude });
-      if (!before) throw new Error("Employee not found");
-      if (!before.deletedAt) throw new Error("Employee is not deleted");
-      const after = await tx.employee.update({ where: { id }, data: { deletedAt: null } });
+      if (!before) throw notFound("This employee");
+      if (!before.deletedAt) {
+        throw new AppError(`${before.permanentId} (${before.name}) is not deleted, so there is nothing to restore.`, {
+          status: 409,
+          code: "NOT_DELETED",
+        });
+      }
+      const after = await tx.employee.update({
+        where: { id },
+        data: { deletedAt: null, deletedById: null, deletedByEmail: null, deleteReason: null },
+      });
       await tx.employeeHistory.create({
         data: { employeeId: id, snapshot: before as never, reason: "Employee restored" },
       });
@@ -35,7 +45,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
     return NextResponse.json({ data: employee });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to restore employee";
-    return NextResponse.json({ error: message }, { status: message === "Employee not found" ? 404 : 409 });
+    return apiError(error, "Restoring the employee");
   }
 }

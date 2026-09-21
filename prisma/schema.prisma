@@ -11,6 +11,7 @@ datasource db {
 model User {
   id            String         @id @default(cuid())
   email         String         @unique
+  name          String?
   passwordHash  String?
   role          Role
   employeeId    String?        @unique
@@ -63,6 +64,9 @@ model Employee {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @default(now()) @updatedAt
   deletedAt           DateTime?
+  deletedById         String?
+  deletedByEmail      String?
+  deleteReason        String?
   assignments         AssetAssignment[]
   receivedTransfers   AssetTransfer[]    @relation("receiver")
   sentTransfers       AssetTransfer[]    @relation("sender")
@@ -288,6 +292,10 @@ model FixedAsset {
   depreciationMethod    DepreciationMethod?
   disposalReason        DisposalReason?
   disposalRemarks       String?
+  deletedAt             DateTime?
+  deletedById           String?
+  deletedByEmail        String?
+  deleteReason          String?
   assignments           AssetAssignment[]
   qr                    AssetQRCode?
   transfers             AssetTransfer[]
@@ -299,6 +307,7 @@ model FixedAsset {
   @@index([status, category])
   @@index([locationId])
   @@index([departmentId])
+  @@index([deletedAt])
 }
 
 model AssetAssignment {

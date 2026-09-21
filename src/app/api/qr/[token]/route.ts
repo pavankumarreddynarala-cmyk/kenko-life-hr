@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
+import { apiError } from "@/lib/api-error";
 
 function escapeXml(value: string) {
   return value.replace(/[<>&'"]/g, (character) => {
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         ...(download ? { "Content-Disposition": `attachment; filename="${record.asset.faId}-qr.svg"` } : {}),
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, "Preparing the QR code");
   }
 }

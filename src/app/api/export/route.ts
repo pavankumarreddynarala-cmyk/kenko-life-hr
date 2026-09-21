@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { workbookResponse } from "@/lib/excel";
 import { audit } from "@/lib/audit";
+import { apiError } from "@/lib/api-error";
 import { employeeInclude } from "@/lib/employees";
 import { employeeImportColumns, assetImportColumns } from "@/lib/imports";
 
@@ -17,11 +18,12 @@ export async function GET(req: NextRequest) {
     const type = req.nextUrl.searchParams.get("type");
     let rows: Record<string, unknown>[] = [];
     if (type === "employees") {
-      const employees = await db.employee.findMany({ include: employeeInclude, orderBy: { permanentId: "asc" } });
+      const employees = await db.employee.findMany({ where: { deletedAt: null }, include: employeeInclude, orderBy: { permanentId: "asc" } });
       rows = employees.map((employee, index) => ({
         "S.No": index + 1,
         "Employee Code": employee.permanentId,
-        CODE: employee.dynamicId,
+        "Team Office Code": employee.teamOfficeCode,
+        "Organisation Code": employee.dynamicId,
         City: employee.city?.name,
         "City Code": employee.city?.code,
         "Outlet Model": employee.outletModel?.name,
@@ -32,7 +34,6 @@ export async function GET(req: NextRequest) {
         "Department Code": employee.department?.code,
         "Employee Role": employee.employeeRole?.name,
         "Employee Role Code": employee.employeeRole?.code,
-        "Team Office Code": employee.teamOfficeCode,
         "Name as per PAN": employee.name,
         "Date of Joining": employee.joiningDate,
         "Last Day of Working": employee.exitDate,
@@ -63,6 +64,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Management access required for asset export" }, { status: 403 });
       }
       const assets = await db.fixedAsset.findMany({
+        where: { deletedAt: null },
         include: {
           location: true,
           department: true,
@@ -129,7 +131,7 @@ export async function GET(req: NextRequest) {
       metadata: { rowCount: rows.length },
     });
     return new NextResponse(file, { headers });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, "Exporting the file");
   }
 }

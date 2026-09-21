@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { signEmailVerification, signSession } from "@/lib/auth";
+import { setSessionCookie, signEmailVerification } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { verifyOtp } from "@/lib/otp";
 import { emailSchema } from "@/lib/validators";
@@ -51,22 +51,12 @@ export async function POST(req: NextRequest) {
       path: "/",
     });
     if (employee && employee.deletedAt === null) {
-      response.cookies.set(
-        "kenko_session",
-        signSession({
-          userId: employee.user?.id ?? employee.id,
-          email: employee.email ?? email,
-          role: "EMPLOYEE",
-          employeeId: employee.id,
-        }),
-        {
-          httpOnly: true,
-          sameSite: "strict",
-          secure: process.env.NODE_ENV === "production",
-          maxAge: 8 * 60 * 60,
-          path: "/",
-        },
-      );
+      setSessionCookie(response, {
+        userId: employee.user?.id ?? employee.id,
+        email: employee.email ?? email,
+        role: "EMPLOYEE",
+        employeeId: employee.id,
+      });
     }
     await audit({
       actorId: employee?.id ?? email,

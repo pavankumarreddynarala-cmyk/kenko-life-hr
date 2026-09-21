@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { apiError } from "@/lib/api-error";
-
-const typeSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/),
-});
+import { apiError, validationError } from "@/lib/api-error";
+import { AppError } from "@/lib/app-error";
+import { masterSchema } from "@/lib/master-schema";
 
 // Lists every custom master type together with its values, for the Master Data page's
 // "Custom" section and for any future dropdown that wants to consume them.
@@ -21,7 +17,7 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json({ data });
   } catch (error) {
-    return apiError(error, "Unable to load custom master types");
+    return apiError(error, "Loading custom masters");
   }
 }
 
@@ -30,9 +26,19 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = requireRole(req, MANAGEMENT_ROLES);
-    const parsed = typeSchema.safeParse(await req.json());
-    if (!parsed.success) return NextResponse.json({ error: "A name and an uppercase unique code are required" }, { status: 400 });
+    const parsed = masterSchema.safeParse(await req.json());
+    if (!parsed.success) return validationError(parsed.error);
     const created = await db.$transaction(async (tx) => {
+      const clash = await tx.customMasterType.findFirst({
+        where: { OR: [{ name: { equals: parsed.data.name, mode: "insensitive" } }, { code: parsed.data.code }] },
+      });
+      if (clash) {
+        const field = clash.code === parsed.data.code ? "code" : "name";
+        throw new AppError(
+          `A master named “${clash.name}” with code ${clash.code} already exists. Enter a different ${field}, or open the existing master from the list.`,
+          { status: 409, code: "DUPLICATE_VALUE", fields: [{ field, label: field === "code" ? "Code" : "Name", message: `This ${field} is already used by “${clash.name}”.` }] },
+        );
+      }
       const type = await tx.customMasterType.create({ data: parsed.data });
       await audit(
         {
@@ -51,7 +57,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ data: { ...created, values: [] } }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create master";
-    return NextResponse.json({ error: message === "FORBIDDEN" ? "Management access required" : "That master name or code already exists" }, { status: message === "FORBIDDEN" ? 403 : 409 });
+    return apiError(error, "Creating the master");
   }
 }

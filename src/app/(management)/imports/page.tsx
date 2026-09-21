@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Shell } from "@/components/shell";
+import { useToast } from "@/components/toast";
+import { requestJson } from "@/lib/client-api";
 import { FilterableTable, TableColumn } from "@/components/filterable-table";
 
 type RowError = { rowNumber: number; field?: string; message: string };
@@ -15,24 +16,31 @@ function ImportPanel({ type, title, templateType }: { type: "employees" | "asset
   const [busy, setBusy] = useState<"validate" | "confirm" | null>(null);
   const [result, setResult] = useState<ValidateResult | null>(null);
   const [confirmResult, setConfirmResult] = useState<ConfirmResult | null>(null);
-  const [message, setMessage] = useState("");
+  const toast = useToast();
 
   async function validate() {
     const file = fileRef.current?.files?.[0];
-    if (!file) return setMessage("Choose a completed template file first.");
-    setMessage("");
+    if (!file) {
+      toast.error("Choose the completed template file (.xlsx or .xls) before pressing Validate. Download the template first if you do not have one.", {
+        title: "No file selected",
+      });
+      return;
+    }
     setConfirmResult(null);
     setBusy("validate");
     try {
       const form = new FormData();
       form.set("type", type);
       form.set("file", file);
-      const response = await fetch("/api/imports/validate", { method: "POST", body: form });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Unable to validate the file");
+      const body = await requestJson<{ data: ValidateResult }>("/api/imports/validate", { method: "POST", body: form });
       setResult(body.data);
+      if (body.data.errorCount) {
+        toast.info(`${body.data.errorCount} row(s) have problems. Review the list below, fix the file and validate again — or import only the valid rows.`, {
+          title: "Validation finished",
+        });
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to validate the file");
+      toast.fromError(error, "The file could not be validated");
     } finally {
       setBusy(null);
     }
@@ -41,16 +49,16 @@ function ImportPanel({ type, title, templateType }: { type: "employees" | "asset
   async function confirm() {
     if (!result) return;
     setBusy("confirm");
-    setMessage("");
     try {
-      const response = await fetch(`/api/imports/${result.batchId}/confirm`, { method: "POST" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Unable to import this batch");
+      const body = await requestJson<{ data: ConfirmResult }>(`/api/imports/${result.batchId}/confirm`, { method: "POST" });
       setConfirmResult(body.data);
       setResult(null);
       if (fileRef.current) fileRef.current.value = "";
+      toast.success(`${body.data.imported} row(s) imported.${body.data.failed ? ` ${body.data.failed} row(s) failed — see the summary below.` : ""}`, {
+        title: "Import complete",
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to import this batch");
+      toast.fromError(error, "The import did not run");
     } finally {
       setBusy(null);
     }
@@ -73,7 +81,6 @@ function ImportPanel({ type, title, templateType }: { type: "employees" | "asset
           {busy === "validate" ? "Validating…" : "Validate"}
         </button>
       </div>
-      {message && <p className="mt-3 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">{message}</p>}
       {result && (
         <div className="mt-4 rounded-lg border border-stone-200 p-4">
           <p className="text-sm">
@@ -96,7 +103,7 @@ function ImportPanel({ type, title, templateType }: { type: "employees" | "asset
       )}
       {confirmResult && (
         <p className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-900">
-          Imported {confirmResult.imported} row(s).{confirmResult.failed ? ` ${confirmResult.failed} row(s) failed during the final write — see Audit Logs for details.` : ""}
+          Imported {confirmResult.imported} row(s).{confirmResult.failed ? ` ${confirmResult.failed} row(s) failed during the final write. Re-validate the file to see why, then import the corrected rows again.` : ""}
         </p>
       )}
     </section>
@@ -104,13 +111,17 @@ function ImportPanel({ type, title, templateType }: { type: "employees" | "asset
 }
 
 export default function Imports() {
+  const toast = useToast();
   const [history, setHistory] = useState<HistoryRow[]>([]);
 
   const loadHistory = useCallback(async () => {
-    const response = await fetch("/api/imports", { cache: "no-store" });
-    const body = await response.json();
-    setHistory(body.data ?? []);
-  }, []);
+    try {
+      const body = await requestJson<{ data: HistoryRow[] }>("/api/imports", { cache: "no-store" });
+      setHistory(body.data ?? []);
+    } catch (error) {
+      toast.fromError(error, "Import history could not be loaded");
+    }
+  }, [toast]);
 
   useEffect(() => {
     void loadHistory();
@@ -125,7 +136,7 @@ export default function Imports() {
   ];
 
   return (
-    <Shell>
+    <>
       <h2 className="text-2xl font-bold">Import / Export</h2>
       <p className="mt-1 text-stone-500">Imports are staged, validated row-by-row, reviewed, then confirmed.</p>
       <div className="mt-6 grid gap-5 md:grid-cols-2">
@@ -138,6 +149,6 @@ export default function Imports() {
           <FilterableTable rows={history} columns={historyColumns} emptyMessage="No imports yet." />
         </div>
       </section>
-    </Shell>
+    </>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Shell } from "@/components/shell";
+import { useToast } from "@/components/toast";
+import { requestJson } from "@/lib/client-api";
 import { FilterableTable, TableColumn } from "@/components/filterable-table";
 
 type AuditRow = {
@@ -26,12 +27,13 @@ function compactJson(value: unknown) {
 }
 
 export default function AuditPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<AuditRow[]>([]);
   useEffect(() => {
-    void fetch("/api/audit", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((body) => setRows(body.data ?? []));
-  }, []);
+    requestJson<{ data: AuditRow[] }>("/api/audit", { cache: "no-store" })
+      .then((body) => setRows(body.data ?? []))
+      .catch((error) => toast.fromError(error, "The audit log could not be loaded"));
+  }, [toast]);
   const columns = useMemo<TableColumn<AuditRow>[]>(
     () => [
       { key: "time", label: "Timestamp", render: (row) => new Date(row.createdAt).toLocaleString("en-IN"), filterValue: (row) => new Date(row.createdAt).toLocaleString("en-IN") },
@@ -47,7 +49,7 @@ export default function AuditPage() {
     [],
   );
   return (
-    <Shell>
+    <>
       <div className="mb-4">
         <h2 className="text-2xl font-bold">Audit Log</h2>
         <p className="text-sm text-stone-500">Append-only actor, action, entity, before/after, and timestamp history.</p>
@@ -58,6 +60,6 @@ export default function AuditPage() {
       <div className="card overflow-hidden p-0">
         <FilterableTable rows={rows} columns={columns} emptyMessage="No audit events recorded." />
       </div>
-    </Shell>
+    </>
   );
 }

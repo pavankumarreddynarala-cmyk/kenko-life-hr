@@ -6,6 +6,7 @@ import { audit } from "@/lib/audit";
 import { allocateEmployeeCode, employeeInclude, refreshDynamicEmployeeCode } from "@/lib/employees";
 import { deriveAssetComputedFields } from "@/lib/assets";
 import { apiError } from "@/lib/api-error";
+import { AppError } from "@/lib/app-error";
 
 const assetInclude = { qr: true, company: true, location: true, department: true, costCentre: true } as const;
 
@@ -54,7 +55,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bat
         }
         imported += 1;
       } catch (error) {
-        failures.push({ rowNumber: __rowNumber, message: error instanceof Error ? error.message : "Unable to import this row" });
+        failures.push({
+          rowNumber: __rowNumber,
+          message:
+            error instanceof AppError
+              ? error.message
+              : "This row could not be saved — it may duplicate a record added after validation. Re-validate the file and import again.",
+        });
       }
     }
 

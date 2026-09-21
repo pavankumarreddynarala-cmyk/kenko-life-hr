@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-
-const valueSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{1,20}$/),
-});
+import { apiError, validationError } from "@/lib/api-error";
+import { AppError, notFound } from "@/lib/app-error";
+import { customValueSchema } from "@/lib/master-schema";
 
 // Adds one coded value under an existing custom master type (e.g. under "Shift Type":
 // code "NIGHT", name "Night Shift"). This is what lets an admin grow a custom master's
@@ -16,12 +13,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ typ
   try {
     const session = requireRole(req, MANAGEMENT_ROLES);
     const { typeId } = await params;
-    const parsed = valueSchema.safeParse(await req.json());
-    if (!parsed.success) return NextResponse.json({ error: "A name and an uppercase unique code are required" }, { status: 400 });
+    const parsed = customValueSchema.safeParse(await req.json());
+    if (!parsed.success) return validationError(parsed.error);
 
     const created = await db.$transaction(async (tx) => {
       const type = await tx.customMasterType.findUnique({ where: { id: typeId } });
-      if (!type) throw new Error("Master type not found");
+      if (!type) throw notFound("This master");
+      const clash = await tx.customMasterValue.findFirst({
+        where: { typeId, OR: [{ name: { equals: parsed.data.name, mode: "insensitive" } }, { code: parsed.data.code }] },
+      });
+      if (clash) {
+        const field = clash.code === parsed.data.code ? "code" : "name";
+        throw new AppError(
+          `“${type.name}” already has a value named “${clash.name}” with code ${clash.code}. Enter a different ${field}, or edit the existing value instead.`,
+          { status: 409, code: "DUPLICATE_VALUE", fields: [{ field, label: field === "code" ? "Code" : "Name", message: `This ${field} is already used by “${clash.name}”.` }] },
+        );
+      }
       const value = await tx.customMasterValue.create({ data: { ...parsed.data, typeId } });
       await audit(
         {
@@ -41,10 +48,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ typ
     });
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to add value";
-    return NextResponse.json(
-      { error: message === "Master type not found" ? message : message === "FORBIDDEN" ? "Management access required" : "That name or code already exists under this master" },
-      { status: message === "Master type not found" ? 404 : message === "FORBIDDEN" ? 403 : 409 },
-    );
+    return apiError(error, "Adding the value");
   }
 }

@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { masterDefinitions, type MasterType } from "@/lib/masters";
 import { employeeAdminSchema } from "@/lib/validators";
-import { assetSchema } from "@/lib/assets";
+import { assetSchema, itcIssue } from "@/lib/assets";
 
 export type ImportColumn = {
   header: string;
@@ -15,6 +15,7 @@ export type ImportColumn = {
 // same list, so the two can never drift apart.
 export const employeeImportColumns: ImportColumn[] = [
   { header: "Name as per PAN", field: "name", kind: "text" },
+  { header: "Team Office Code", field: "teamOfficeCode", kind: "text" },
   { header: "Mobile Number", field: "phone", kind: "text" },
   { header: "Work Email", field: "email", kind: "text" },
   { header: "Personal Email", field: "personalEmail", kind: "text" },
@@ -189,6 +190,13 @@ export async function validateImportRows(
     // normalized to +91XXXXXXXXXX) so two differently-formatted entries for the same
     // person/asset are still caught.
     const validated = parsed.data as Record<string, unknown>;
+    if (type === "assets") {
+      const itc = itcIssue(validated);
+      if (itc) {
+        errors.push({ rowNumber, field: "ITC Availed", message: itc.message, raw: validated.itcAvailed });
+        return;
+      }
+    }
     let duplicateWithinFile = false;
     for (const field of dedupeField) {
       const value = String(validated[field] ?? "").trim().toLowerCase();
