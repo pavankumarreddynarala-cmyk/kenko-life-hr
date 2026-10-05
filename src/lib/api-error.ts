@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { AppError, type FieldIssue } from "@/lib/app-error";
 import { fieldLabel } from "@/lib/field-labels";
+import { ConfigurationError, publicConfigurationMessage } from "@/lib/runtime-config";
 import { summariseIssues, zodFieldIssues } from "@/lib/zod-errors";
 
 type ErrorPayload = { error: string; code: string; fields?: FieldIssue[]; reference?: string };
@@ -120,6 +121,10 @@ export function apiError(error: unknown, fallback: string, status = 500) {
     );
   }
   if (error instanceof ZodError) return validationError(error);
+  if (error instanceof ConfigurationError) {
+    console.error(`[configuration: ${error.code}] ${error.message}`);
+    return respond({ error: publicConfigurationMessage(error), code: error.code }, 503);
+  }
   if (error instanceof Error && error.message === "UNAUTHENTICATED") {
     return respond(
       { error: "Your session has expired or you are not signed in. Sign in again to continue.", code: "UNAUTHENTICATED" },

@@ -5,6 +5,7 @@ import { workbookResponse } from "@/lib/excel";
 import { audit } from "@/lib/audit";
 import { apiError } from "@/lib/api-error";
 import { employeeInclude } from "@/lib/employees";
+import { VENDOR_FIELDS } from "@/lib/vendor-fields";
 import { employeeImportColumns, assetImportColumns } from "@/lib/imports";
 
 const headers = {
@@ -95,6 +96,21 @@ export async function GET(req: NextRequest) {
         "Disposal Remarks": asset.disposalRemarks,
         "Profit/Loss on Disposal": String(asset.profitLossOnDisposal),
         Status: asset.status,
+      }));
+    } else if (type === "vendors") {
+      if (!MANAGEMENT_ROLES.includes(session.role)) return NextResponse.json({ error: "Management access required for vendor export" }, { status: 403 });
+      const vendors = await db.vendor.findMany({ orderBy: { createdAt: "asc" } });
+      rows = vendors.map((vendor, index) => ({
+        "S.No": index + 1,
+        "Vendor Email": vendor.email,
+        Status: vendor.status === "SUBMITTED" ? "Submitted" : "Invited (not submitted)",
+        Active: vendor.active ? "Yes" : "No",
+        ...Object.fromEntries(VENDOR_FIELDS.map((field) => [field.label, (vendor as Record<string, unknown>)[field.key] ?? ""])),
+        "Bank Details Locked": vendor.bankLocked ? "Yes" : "No",
+        "Submitted On": vendor.submittedAt ?? "",
+        "Invited By": vendor.invitedByEmail ?? "",
+        "Created On": vendor.createdAt,
+        "Last Updated": vendor.updatedAt,
       }));
     } else if (type === "audit") {
       if (!MANAGEMENT_ROLES.includes(session.role)) return NextResponse.json({ error: "Management access required" }, { status: 403 });

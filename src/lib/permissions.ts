@@ -26,7 +26,15 @@ export type Permissions = {
   restoreAsset: boolean;
   editMasterData: boolean;
   deleteMasterData: boolean;
+  /** R15: vendor bank details are changed by an admin only. */
+  editVendorBank: boolean;
+  /** R16 / R17: upload SOPs and generate letters (Admin, CEO, COO, HR). */
+  manageDocuments: boolean;
+  /** R17: upload or retire letter templates (Admin, CEO, COO). */
+  manageTemplates: boolean;
 };
+
+export const DOCUMENT_ROLE_NAMES: readonly RoleName[] = ["ADMIN", "CEO", "COO", "HR"];
 
 export function isManagementRole(role: string): boolean {
   return (MANAGEMENT_ROLE_NAMES as readonly string[]).includes(role);
@@ -44,6 +52,9 @@ export function permissionsFor(role: string): Permissions {
     restoreAsset: privileged,
     editMasterData: isManagementRole(role),
     deleteMasterData: privileged,
+    editVendorBank: privileged,
+    manageDocuments: (DOCUMENT_ROLE_NAMES as readonly string[]).includes(role),
+    manageTemplates: privileged,
   };
 }
 

@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import { NextRequest, NextResponse } from "next/server";
 import { Role } from "@prisma/client";
 import { forbidden, unauthenticated } from "@/lib/app-error";
-import { MANAGEMENT_ROLE_NAMES, PRIVILEGED_ROLE_NAMES } from "@/lib/permissions";
+import { DOCUMENT_ROLE_NAMES, MANAGEMENT_ROLE_NAMES, PRIVILEGED_ROLE_NAMES } from "@/lib/permissions";
 
 export type Session = { userId: string; email: string; role: Role; employeeId?: string };
 
@@ -11,6 +11,8 @@ export type Session = { userId: string; email: string; role: Role; employeeId?: 
 // only restricted role (Employee Portal, own data only).
 export const MANAGEMENT_ROLES: Role[] = [...MANAGEMENT_ROLE_NAMES] as Role[];
 export const PRIVILEGED_ROLES: Role[] = [...PRIVILEGED_ROLE_NAMES] as Role[];
+// R16 / R17: upload SOPs and generate HR letters.
+export const DOCUMENT_ROLES: Role[] = [...DOCUMENT_ROLE_NAMES] as Role[];
 
 // Inactivity policy: the browser signs the user out after 5 idle minutes (with a warning
 // beforehand). The server enforces the same limit independently: the session cookie only

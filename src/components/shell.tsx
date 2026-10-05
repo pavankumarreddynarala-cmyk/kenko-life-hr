@@ -16,6 +16,9 @@ const MANAGEMENT_NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Employee Master", href: "/employees" },
   { label: "Asset Register", href: "/assets" },
+  { label: "Vendor Master", href: "/vendors" },
+  { label: "SOPs", href: "/sops" },
+  { label: "Document Generation", href: "/letters" },
   { label: "Transfers", href: "/transfers" },
   { label: "Master Data", href: "/masters" },
   { label: "Depreciation Setup", href: "/depreciation-setup" },
@@ -27,6 +30,7 @@ const EMPLOYEE_NAV: NavItem[] = [
   { label: "My Profile", href: "/employee", also: ["/employee/employment", "/employee/bank"] },
   { label: "My Assets", href: "/employee/assets" },
   { label: "My Requests", href: "/employee/requests" },
+  { label: "SOPs", href: "/employee/sops" },
 ];
 
 function initials(name: string) {
