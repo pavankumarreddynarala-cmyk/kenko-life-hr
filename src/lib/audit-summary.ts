@@ -106,6 +106,59 @@ export function describeAudit(log: AuditLike, transfers?: Map<string, TransferLo
     return line(`${action === "MASTER_ACTIVATED" ? "activated" : "deactivated"} ${masterSubject(log)}`, action === "MASTER_ACTIVATED" ? "success" : "warning");
   }
 
+  if (module === "VENDOR") {
+    const who = str(rec(log.metadata).vendorEmail) ?? str(rec(log.newValue).email) ?? log.recordId;
+    switch (action) {
+      case "INVITED":
+        return line(`sent a vendor link to ${str(rec(log.newValue).email) ?? who}`);
+      case "INVITE_REISSUED":
+        return line(`sent a new vendor link to ${str(rec(log.newValue).email) ?? who}`);
+      case "SUBMITTED":
+        return { actor: who, text: "submitted their vendor details", tone: "success" };
+      case "UPDATED":
+        return line(`updated vendor ${who}`);
+      case "SELF_UPDATED":
+        return { actor: who, text: "updated their own vendor details", tone: "info" };
+      case "BANK_DETAILS_CHANGED":
+        return { actor: log.email ?? who, text: `changed the bank details of vendor ${who}`, tone: "warning" };
+      case "ACTIVATED":
+        return line(`activated vendor ${who}`, "success");
+      case "DEACTIVATED":
+        return line(`deactivated vendor ${who}`, "warning");
+    }
+  }
+  if (module === "SOP") {
+    const title = str(rec(log.newValue).title) ?? str(rec(log.previousValue).title) ?? log.recordId;
+    switch (action) {
+      case "CREATED":
+        return line(`uploaded SOP “${title}”`, "success");
+      case "FILE_REPLACED":
+        return line(`replaced the file of SOP “${title}”`);
+      case "RETAGGED":
+        return line(`changed who can see SOP “${title}”`);
+      case "UPDATED":
+        return line(`updated SOP “${title}”`);
+      case "DELETED":
+        return line(`deleted SOP “${title}”`, "warning");
+    }
+  }
+  if (module === "LETTER") {
+    const meta = rec(log.metadata);
+    switch (action) {
+      case "TEMPLATE_UPLOADED":
+        return line(`uploaded letter template “${str(rec(log.newValue).name) ?? log.recordId}”`, "success");
+      case "TEMPLATE_REPLACED":
+        return line(`replaced letter template “${str(rec(log.newValue).name) ?? log.recordId}”`);
+      case "TEMPLATE_UPDATED":
+        return line(`updated letter template “${str(rec(log.newValue).name) ?? log.recordId}”`);
+      case "DOWNLOADED_DOCX":
+      case "DOWNLOADED_PDF":
+        return line(`downloaded a ${str(meta.template) ?? "letter"} for ${str(meta.employee) ?? "an employee"}`);
+      case "EMAILED_PDF":
+        return line(`emailed a ${str(meta.template) ?? "letter"} to ${str(meta.sentTo) ?? "an employee"}`, "success");
+    }
+  }
+
   if (recordType === "Employee") {
     const subject = employeeSubject(log);
     switch (action) {

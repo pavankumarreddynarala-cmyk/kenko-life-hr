@@ -543,3 +543,94 @@ model AppSetting {
   value     Json
   updatedAt DateTime @default(now()) @updatedAt
 }
+
+// ───────────── Stage 3: vendors, SOPs, letters ─────────────
+
+model Vendor {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  status           String    @default("INVITED") // INVITED | SUBMITTED
+  inviteTokenHash  String?   @unique
+  inviteExpiresAt  DateTime?
+  invitedByEmail   String?
+  legalName        String?
+  tradeName        String?
+  vendorType       String?
+  contactPerson    String?
+  phone            String?
+  address1         String?
+  address2         String?
+  city             String?
+  state            String?
+  pinCode          String?
+  gstin            String?
+  pan              String?
+  msmeNumber       String?
+  website          String?
+  bankHolderName   String?
+  bankName         String?
+  bankBranch       String?
+  accountNumber    String?
+  ifscCode         String?
+  bankLocked       Boolean   @default(false)
+  submittedAt      DateTime?
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @default(now()) @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SopDocument {
+  id             String   @id @default(cuid())
+  title          String
+  description    String?
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  content        Bytes
+  version        Int      @default(1)
+  audience       String   @default("TAGGED") // ALL | TAGGED
+  departmentIds  String[] @default([])
+  roleIds        String[] @default([])
+  uploadedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  @@index([updatedAt])
+}
+
+model LetterTemplate {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  letterType      String   // OFFER | RELIEVING | EXPERIENCE | OTHER
+  fileName        String
+  content         Bytes
+  fields          String[] @default([])
+  version         Int      @default(1)
+  active          Boolean  @default(true)
+  uploadedByEmail String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+  logs            LetterLog[]
+}
+
+model LetterLog {
+  id             String   @id @default(cuid())
+  templateId     String?
+  templateName   String
+  letterType     String
+  employeeId     String?
+  employeeCode   String?
+  employeeName   String?
+  action         String   // DOWNLOADED_DOCX | DOWNLOADED_PDF | EMAILED_PDF
+  sentTo         String?
+  actorEmail     String
+  values         Json?
+  createdAt      DateTime @default(now())
+  template       LetterTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([employeeId])
+}
