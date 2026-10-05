@@ -16,22 +16,61 @@ export const employeeInclude = {
   costCentre: true,
 } satisfies Prisma.EmployeeInclude;
 
+// Slimmer shape for list screens: only the fields the tables display (R3).
+const ref = { select: { id: true, name: true, code: true } } as const;
+export const employeeListInclude = {
+  company: ref,
+  location: ref,
+  city: ref,
+  branch: ref,
+  outletModel: ref,
+  specialBranchCode: ref,
+  department: ref,
+  employeeRole: ref,
+  designation: ref,
+  costCentre: ref,
+} satisfies Prisma.EmployeeInclude;
+
+const EMPLOYEE_CODE_LOCK = 7_340_101;
+
 /**
- * Next auto-generated Employee Code (EMP0001, EMP0002, …). An Admin may hand-edit a code
- * to a value the sequence has not reached yet, so skip any number that is already taken
- * instead of failing the create with a unique-constraint error.
+ * R4: the next Employee Code is the highest existing number in Employee Master plus one
+ * (deleted employees included, so a number is never reused). Must run inside a transaction:
+ * the advisory lock serialises concurrent additions so two requests can never receive the
+ * same number; it is released when the transaction ends.
  */
 export async function allocateEmployeeCode(tx: Prisma.TransactionClient) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const [row] = await tx.$queryRaw<Array<{ value: bigint }>>`SELECT nextval('employee_code_seq') AS value`;
-    const code = `EMP${String(row.value).padStart(4, "0")}`;
-    const taken = await tx.employee.findUnique({ where: { permanentId: code }, select: { id: true } });
-    if (!taken) return code;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${EMPLOYEE_CODE_LOCK})`;
+  const [row] = await tx.$queryRaw<Array<{ value: bigint }>>`
+    SELECT COALESCE(MAX(CAST(substring("permanentId" from '[0-9]+$') AS BIGINT)), 0) + 1 AS value FROM "Employee"`;
+  return `EMP${String(row.value).padStart(4, "0")}`;
+}
+
+/** R10: Last working day is mandatory when status is EXITED and cannot precede the joining date. */
+export function exitDateProblem(
+  status: string | undefined,
+  joiningDate: Date | null | undefined,
+  exitDate: Date | null | undefined,
+): FieldIssue | null {
+  if (status !== "EXITED") return null;
+  if (!exitDate) return { field: "exitDate", label: fieldLabel("exitDate"), message: "Enter the last working day — it is required when the status is Exit." };
+  if (joiningDate && exitDate < joiningDate) {
+    return { field: "exitDate", label: fieldLabel("exitDate"), message: "The last working day cannot be earlier than the joining date." };
   }
-  throw new AppError(
-    "The system could not find a free Employee Code. Contact an administrator so the Employee Code sequence can be checked.",
-    { status: 500, code: "EMPLOYEE_CODE_EXHAUSTED" },
-  );
+  return null;
+}
+
+/** An inactive company cannot be chosen for a new or changed assignment (R9). */
+export async function assertCompanyActive(tx: Prisma.TransactionClient, companyId: string | undefined | null) {
+  if (!companyId) return;
+  const company = await tx.company.findUnique({ where: { id: companyId }, select: { active: true, name: true } });
+  if (!company || !company.active) {
+    throw new AppError("The selected company is not active. Choose an active company, or reactivate it in Master Data.", {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      fields: [{ field: "companyId", label: fieldLabel("companyId"), message: "Choose an active company." }],
+    });
+  }
 }
 
 export async function refreshDynamicEmployeeCode(tx: Prisma.TransactionClient, employeeId: string) {

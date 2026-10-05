@@ -8,10 +8,9 @@ import { useToast } from "@/components/toast";
 import { fieldErrorMap, jsonBody, requestJson } from "@/lib/client-api";
 import { describeMissing, requiredErrors, type FormErrors } from "@/lib/form-validation";
 
-// Company is intentionally not listed here: it stays a real, working master under the
-// hood (Employee/Asset company dropdowns still use it), but it's no longer offered from
-// this admin section.
+// R9: Company Master — Add, Edit and Deactivate. Kenko Life stays the first entry.
 const builtinMasters = [
+  ["company", "Companies"],
   ["location", "Locations"],
   ["city", "Cities"],
   ["branch", "Branches"],
@@ -23,7 +22,7 @@ const builtinMasters = [
   ["costCentre", "Cost Centres"],
 ] as const;
 type BuiltinMaster = (typeof builtinMasters)[number][0];
-type Row = { id: string; name: string; code: string; usage?: string };
+type Row = { id: string; name: string; code: string; usage?: string; active?: boolean };
 type CustomMasterType = { id: string; name: string; code: string; values: Row[] };
 
 // Selection is either a built-in typed master (key from builtinMasters) or a custom
@@ -40,7 +39,7 @@ export default function MastersPage() {
   const user = useSessionUser();
   const toast = useToast();
   const { editMasterData: canEdit, deleteMasterData: canDelete } = user.permissions;
-  const [active, setActive] = useState<Selection>({ kind: "builtin", key: "location" });
+  const [active, setActive] = useState<Selection>({ kind: "builtin", key: "company" });
   const [rows, setRows] = useState<Row[]>([]);
   const [customTypes, setCustomTypes] = useState<CustomMasterType[]>([]);
   const [name, setName] = useState("");
@@ -177,6 +176,24 @@ export default function MastersPage() {
     }
   }
 
+  async function setCompanyActive(row: Row, makeActive: boolean) {
+    setBusy(true);
+    try {
+      await requestJson(`/api/masters/company/${row.id}`, jsonBody("PATCH", { active: makeActive }));
+      toast.success(
+        makeActive
+          ? `“${row.name}” is active again and appears in the Company dropdowns.`
+          : `“${row.name}” was deactivated. It no longer appears in the Company dropdowns; existing records keep it.`,
+        { title: makeActive ? "Activated" : "Deactivated" },
+      );
+      await load();
+    } catch (error) {
+      toast.fromError(error, makeActive ? "Not activated" : "Not deactivated");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirmDelete() {
     if (!deleting) return;
     setBusy(true);
@@ -200,6 +217,18 @@ export default function MastersPage() {
     () => [
       { key: "name", label: "Name", render: (row) => row.name, filterValue: (row) => row.name },
       { key: "code", label: "Code", render: (row) => row.code, filterValue: (row) => row.code },
+      ...(active.kind === "builtin" && active.key === "company"
+        ? [{
+            key: "status",
+            label: "Status",
+            render: (row: Row) => (
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${row.active === false ? "bg-stone-200 text-stone-600" : "bg-green-100 text-green-800"}`}>
+                {row.active === false ? "Inactive" : "Active"}
+              </span>
+            ),
+            filterValue: (row: Row) => (row.active === false ? "Inactive" : "Active"),
+          }]
+        : []),
       ...(active.kind === "builtin"
         ? [{ key: "usage", label: "In use by", render: (row: Row) => row.usage || "Not used", filterValue: (row: Row) => row.usage }]
         : []),
@@ -208,7 +237,7 @@ export default function MastersPage() {
         label: "Actions",
         filterable: false,
         render: (row) => (
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             <button
               className="rounded-md bg-stone-100 px-2 py-1 text-kenko-green disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!canEdit}
@@ -219,6 +248,15 @@ export default function MastersPage() {
             >
               Edit
             </button>
+            {active.kind === "builtin" && active.key === "company" && (
+              <button
+                className="rounded-md bg-amber-50 px-2 py-1 text-amber-800 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!canEdit || busy}
+                onClick={() => void setCompanyActive(row, row.active === false)}
+              >
+                {row.active === false ? "Activate" : "Deactivate"}
+              </button>
+            )}
             <button
               className="rounded-md bg-red-50 px-2 py-1 text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!canDelete}
@@ -231,7 +269,8 @@ export default function MastersPage() {
         ),
       },
     ],
-    [active.kind, canEdit, canDelete],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- row actions only need to re-render with these
+    [active, busy, canEdit, canDelete],
   );
 
   return (

@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import { readSessionToken, SESSION_COOKIE, type Session } from "@/lib/auth";
+import { isSuperAdmin, readSessionToken, SESSION_COOKIE, type Session } from "@/lib/auth";
 import { isManagementRole, nameFromEmail, permissionsFor, roleLabel } from "@/lib/permissions";
 import type { SessionUser } from "@/components/session-context";
 
@@ -30,6 +30,7 @@ export async function loadSessionUser(session: Session): Promise<SessionUser | n
       roleLabel: roleLabel(session.role),
       portal: "management",
       permissions: permissionsFor(session.role),
+      canManageLogins: isSuperAdmin({ role: session.role, email: user.email }),
     };
   }
   if (!session.employeeId) return null;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import "@/lib/zod-errors";
+import { FIELD_MESSAGES, IFSC_REGEX, MOBILE_REGEX, PAN_REGEX, UAN_REGEX } from "@/lib/field-rules";
 
 export const INDIAN_STATES_AND_UTS = [
   "Andaman and Nicobar Islands",
@@ -40,26 +41,8 @@ export const INDIAN_STATES_AND_UTS = [
   "West Bengal",
 ] as const;
 
-export const phoneSchema = z
-  .string()
-  .trim()
-  .transform((value) => {
-    const digits = value.replace(/\D/g, "");
-    const national = digits.length === 12 && digits.startsWith("91")
-      ? digits.slice(2)
-      : digits.length === 11 && digits.startsWith("0")
-        ? digits.slice(1)
-        : digits;
-    return `+91${national}`;
-  })
-  .pipe(
-    z
-      .string()
-      .regex(
-        /^\+91[6-9]\d{9}$/,
-        "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8 or 9 (for example 98765 43210). Remove any letters or symbols.",
-      ),
-  );
+// Stored as the bare 10-digit Indian mobile number (no +91, spaces or letters).
+export const phoneSchema = z.string({ required_error: "Enter a 10-digit mobile number." }).trim().regex(MOBILE_REGEX, FIELD_MESSAGES.phone);
 
 export const emailSchema = z
   .string()
@@ -67,8 +50,8 @@ export const emailSchema = z
   .toLowerCase()
   .pipe(z.string().email("Enter a valid email address such as name@company.com."));
 
-const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-const PAN_MESSAGE = "Enter a valid PAN: 5 letters, 4 digits, then 1 letter (for example ABCDE1234F).";
+const PAN_PATTERN = PAN_REGEX;
+const PAN_MESSAGE = FIELD_MESSAGES.pan;
 const AADHAAR_PATTERN = /^[2-9]\d{11}$/;
 const AADHAAR_MESSAGE = "Enter a valid 12-digit Aadhaar number that does not start with 0 or 1.";
 const PIN_PATTERN = /^[1-9][0-9]{5}$/;
@@ -148,13 +131,13 @@ export const employeeAdminSchema = z.object({
   bankHolderName: optionalText(120),
   bankName: optionalText(120),
   accountNumber: optionalText(30),
-  ifscCode: optionalText(20),
+  ifscCode: z.preprocess(blankToUndefined, z.string().trim().toUpperCase().regex(IFSC_REGEX, FIELD_MESSAGES.ifsc).optional()),
   pfEligible: z.preprocess(
     (value) => value === true || value === "true" || value === "yes" || value === 1,
     z.boolean(),
   ).default(false),
   pfAccountNumber: optionalText(40),
-  uanNumber: optionalText(40),
+  uanNumber: z.preprocess(blankToUndefined, z.string().trim().regex(UAN_REGEX, FIELD_MESSAGES.uan).optional()),
   esicNumber: optionalText(40),
   numberOfOutlets: z.preprocess(
     blankToUndefined,
@@ -188,6 +171,12 @@ export const employeeCodeSchema = z
   .trim()
   .toUpperCase()
   .regex(/^[A-Z0-9][A-Z0-9-]{1,19}$/, EMPLOYEE_CODE_MESSAGE);
+
+// R4: a hand-edited Employee Code must stay inside the EMP0001, EMP0002 … series.
+export const employeeSeriesCodeSchema = employeeCodeSchema.regex(
+  /^EMP[0-9]{4,}$/,
+  "Employee Code must follow the series: EMP followed by at least 4 digits (for example EMP0042).",
+);
 
 const RECEIVER_REQUIRED = "Enter the Employee ID of the person who will receive the asset (for example EMP0042).";
 const receiverCodeSchema = z

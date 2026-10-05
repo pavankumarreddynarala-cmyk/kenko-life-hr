@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { safeAssetSelect } from "@/lib/transfers";
 import { db } from "@/lib/db";
 import { getSession, getVerifiedEmail, setSessionCookie } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -15,12 +16,12 @@ const selfInclude = {
   ...employeeInclude,
   assignments: {
     where: { returnedAt: null },
-    include: { asset: { include: { qr: true } } },
+    select: { id: true, assignedAt: true, asset: { select: safeAssetSelect } },
     orderBy: { assignedAt: "desc" },
   },
   sentTransfers: {
     include: {
-      asset: true,
+      asset: { select: safeAssetSelect },
       sender: { select: { permanentId: true, name: true } },
       receiver: { select: { permanentId: true, name: true } },
     },
@@ -28,7 +29,7 @@ const selfInclude = {
   },
   receivedTransfers: {
     include: {
-      asset: true,
+      asset: { select: safeAssetSelect },
       sender: { select: { permanentId: true, name: true } },
       receiver: { select: { permanentId: true, name: true } },
     },
@@ -126,7 +127,6 @@ export async function POST(req: NextRequest) {
         );
         return employee;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     const response = NextResponse.json({ employee: result });
     setSessionCookie(response, {

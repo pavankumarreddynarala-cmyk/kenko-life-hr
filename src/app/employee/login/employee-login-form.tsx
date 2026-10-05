@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast";
 import { fieldErrorMap, jsonBody, requestJson } from "@/lib/client-api";
 import { describeMissing, requiredErrors, type FormErrors } from "@/lib/form-validation";
 import { FIELD_LABELS } from "@/lib/field-labels";
+import { fieldError, normalizePan } from "@/lib/field-rules";
 import { INDIAN_STATES_AND_UTS } from "@/lib/validators";
 
 const REASONS: Record<string, string> = {
@@ -18,7 +19,7 @@ const REASONS: Record<string, string> = {
 const ONBOARDING_FIELDS = [
   ["name", "Name as per PAN card", "text", true],
   ["dateOfBirth", "Date of birth", "date", true],
-  ["phone", "Mobile number", "tel", true],
+  ["phone", "Mobile number (10 digits)", "tel", true],
   ["pan", "PAN number", "text", true],
   ["aadhaar", "Aadhaar number", "text", true],
   ["address1", "Address line 1", "text", true],
@@ -30,6 +31,14 @@ const ONBOARDING_LABELS: Record<string, string> = {
   ...FIELD_LABELS,
   ...Object.fromEntries(ONBOARDING_FIELDS.map(([key, label]) => [key, label])),
   state: "State / Union Territory",
+};
+
+// R5 / R6: right keyboard and clean input on phones; the server checks the same rules again.
+const ONBOARDING_INPUT: Record<string, { inputMode?: "numeric"; maxLength?: number; autoCapitalize?: string; clean: (value: string) => string }> = {
+  phone: { inputMode: "numeric", maxLength: 10, clean: (value) => value.replace(/\D/g, "").slice(0, 10) },
+  pan: { maxLength: 10, autoCapitalize: "characters", clean: (value) => normalizePan(value).slice(0, 10) },
+  aadhaar: { inputMode: "numeric", maxLength: 12, clean: (value) => value.replace(/\D/g, "").slice(0, 12) },
+  pinCode: { inputMode: "numeric", maxLength: 6, clean: (value) => value.replace(/\D/g, "").slice(0, 6) },
 };
 
 type Stage = "email" | "otp" | "onboarding";
@@ -113,7 +122,11 @@ export function EmployeeLoginForm({ reason }: { reason?: string }) {
   }
 
   async function saveOnboarding() {
-    const missing = requiredErrors(form, ONBOARDING_REQUIRED, ONBOARDING_LABELS);
+    const missing: FormErrors = requiredErrors(form, ONBOARDING_REQUIRED, ONBOARDING_LABELS);
+    for (const key of ["phone", "pan"] as const) {
+      const message = fieldError(key, form[key]);
+      if (message && !missing[key]) missing[key] = message;
+    }
     if (Object.keys(missing).length) {
       setErrors(missing);
       toast.error(`Fill in the required fields before continuing: ${describeMissing(missing, ONBOARDING_LABELS)}.`, {
@@ -223,8 +236,12 @@ export function EmployeeLoginForm({ reason }: { reason?: string }) {
                   className={inputClass(Boolean(errors[key]))}
                   type={type}
                   value={form[key] ?? ""}
+                  inputMode={ONBOARDING_INPUT[key]?.inputMode}
+                  maxLength={ONBOARDING_INPUT[key]?.maxLength}
+                  autoCapitalize={ONBOARDING_INPUT[key]?.autoCapitalize}
+                  autoComplete="off"
                   onChange={(event) => {
-                    setForm({ ...form, [key]: event.target.value });
+                    setForm({ ...form, [key]: ONBOARDING_INPUT[key] ? ONBOARDING_INPUT[key].clean(event.target.value) : event.target.value });
                     clear(key);
                   }}
                 />

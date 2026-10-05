@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { allocateEmployeeCode, assertEmployeeUnique, employeeInclude, refreshDynamicEmployeeCode } from "@/lib/employees";
+import { allocateEmployeeCode, assertCompanyActive, assertEmployeeUnique, employeeInclude, employeeListInclude, exitDateProblem, refreshDynamicEmployeeCode } from "@/lib/employees";
 import { employeeAdminSchema } from "@/lib/validators";
 import { apiError, validationError } from "@/lib/api-error";
+import { AppError } from "@/lib/app-error";
 
 export async function GET(req: NextRequest) {
   try {
@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
             }
           : {}),
       },
-      include: employeeInclude,
-      take: 500,
+      include: employeeListInclude,
+      take: 5000,
       orderBy: wantDeleted ? { deletedAt: "desc" } : { createdAt: "desc" },
     });
     return NextResponse.json({ data });
@@ -45,8 +45,14 @@ export async function POST(req: NextRequest) {
     const parsed = employeeAdminSchema.safeParse(await req.json());
     if (!parsed.success) return validationError(parsed.error);
 
+    const problem = exitDateProblem(parsed.data.status, parsed.data.joiningDate, parsed.data.exitDate);
+    if (problem) throw new AppError(problem.message, { status: 400, code: "VALIDATION_ERROR", fields: [problem] });
+    // Last working day only exists for exited employees.
+    if (parsed.data.status !== "EXITED") parsed.data.exitDate = undefined;
+
     const employee = await db.$transaction(
       async (tx) => {
+        await assertCompanyActive(tx, parsed.data.companyId);
         await assertEmployeeUnique(tx, parsed.data);
         // The Employee Code is always generated here; an Admin can edit it afterwards.
         const permanentId = await allocateEmployeeCode(tx);
@@ -67,7 +73,6 @@ export async function POST(req: NextRequest) {
         );
         return tx.employee.findUniqueOrThrow({ where: { id: created.id }, include: employeeInclude });
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     return NextResponse.json({ data: employee }, { status: 201 });
   } catch (error) {

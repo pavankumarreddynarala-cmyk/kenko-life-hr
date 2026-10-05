@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { assertEmployeeUnique, employeeInclude, refreshDynamicEmployeeCode } from "@/lib/employees";
-import { deleteRecordSchema, employeeAdminSchema, employeeCodeSchema } from "@/lib/validators";
+import { assertCompanyActive, assertEmployeeUnique, employeeInclude, exitDateProblem, refreshDynamicEmployeeCode } from "@/lib/employees";
+import { deleteRecordSchema, employeeAdminSchema, employeeSeriesCodeSchema } from "@/lib/validators";
 import { apiError, validationError } from "@/lib/api-error";
 import { AppError, forbidden, notFound } from "@/lib/app-error";
 import { permissionsFor } from "@/lib/permissions";
 
-const patchSchema = employeeAdminSchema.partial().extend({ permanentId: employeeCodeSchema.optional() });
+const patchSchema = employeeAdminSchema.partial().extend({ permanentId: employeeSeriesCodeSchema.optional() });
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -46,7 +46,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         id,
       );
 
-      await tx.employee.update({ where: { id }, data: parsed.data });
+      if (parsed.data.companyId && parsed.data.companyId !== before.companyId) await assertCompanyActive(tx, parsed.data.companyId);
+
+      // R10: Last working day is required when the status is Exit and only kept for exited employees.
+      const status = parsed.data.status ?? before.status;
+      const joiningDate = parsed.data.joiningDate ?? before.joiningDate;
+      const exitDate = parsed.data.exitDate ?? (status === "EXITED" ? before.exitDate : null);
+      const problem = exitDateProblem(status, joiningDate, exitDate);
+      if (problem) throw new AppError(problem.message, { status: 400, code: "VALIDATION_ERROR", fields: [problem] });
+
+      await tx.employee.update({ where: { id }, data: { ...parsed.data, exitDate: status === "EXITED" ? exitDate : null } });
       await refreshDynamicEmployeeCode(tx, id);
       const after = await tx.employee.findUniqueOrThrow({ where: { id }, include: employeeInclude });
       await tx.employeeHistory.create({

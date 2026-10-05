@@ -23,7 +23,7 @@ model User {
 
 model Employee {
   id                  String             @id @default(cuid())
-  permanentId         String             @unique @default(dbgenerated("('EMP'::text || lpad((nextval('employee_code_seq'::regclass))::text, 4, '0'::text))"))
+  permanentId         String             @unique
   dynamicId           String?            @unique
   teamOfficeCode      String?
   name                String
@@ -89,12 +89,14 @@ model Employee {
   @@index([cityId])
   @@index([status])
   @@index([deletedAt])
+  @@index([createdAt])
 }
 
 model Company {
   id        String       @id @default(cuid())
   name      String       @unique
   code      String       @unique
+  active    Boolean      @default(true)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @default(now()) @updatedAt
   employees Employee[]
@@ -308,6 +310,7 @@ model FixedAsset {
   @@index([locationId])
   @@index([departmentId])
   @@index([deletedAt])
+  @@index([capitalisationDate])
 }
 
 model AssetAssignment {
@@ -510,4 +513,33 @@ enum DisposalReason {
   WRITTEN_OFF
   TRANSFERRED
   OTHER
+}
+// Stage 2: depreciation masters (R13). Useful life, residual % and method are data, not code.
+model AssetCategory {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  usefulLifeYears  Int
+  residualPercent  Decimal  @default(5) @db.Decimal(5, 2)
+  method           String   @default("SLM")
+  defaultTaxBlock  String?
+  verified         Boolean  @default(false)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+}
+
+model TaxBlock {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  rate      Decimal  @db.Decimal(5, 2)
+  verified  Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt
 }

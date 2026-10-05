@@ -12,12 +12,10 @@ import { fieldErrorMap, jsonBody, requestJson } from "@/lib/client-api";
 import { describeMissing, requiredErrors, type FormErrors } from "@/lib/form-validation";
 import { FIELD_LABELS } from "@/lib/field-labels";
 import { ITC_NOT_ELIGIBLE_MESSAGE } from "@/lib/assets";
+import { DepreciationPanel } from "@/components/depreciation-panel";
+import { ScanQrButton } from "@/components/qr-scanner";
 
 type MasterItem = { id: string; name: string; code: string };
-type PeriodFigure = {
-  book: { financialYear: string; depreciationForYear: number; ytdDepreciation: number; netBookValue: number; closingAccumulatedDepreciation: number };
-  tax: { financialYear: string; taxDepreciation: number; closingWdv: number };
-};
 type Asset = Record<string, unknown> & {
   id: string;
   faId: string;
@@ -32,7 +30,6 @@ type Asset = Record<string, unknown> & {
   department?: MasterItem;
   costCentre?: MasterItem;
   assignments?: Array<{ employee?: { permanentId: string; name: string }; custodianName?: string }>;
-  depreciationByYear?: Record<string, PeriodFigure>;
 };
 
 type FieldDef = { key: string; label: string; computed?: boolean };
@@ -148,7 +145,6 @@ const dateKeys = ["invoiceDate", "capitalisationDate", "disposalDate", "verifica
 const textKeys = ["faId", "category", "description", "makeModel", "serialNo", "vendorName", "invoiceNo", "poGrnNo", "taxBlock", "disposalRemarks", "verificationStatus"];
 const masterFields: Record<string, string> = { companyId: "company", locationId: "location", departmentId: "department", costCentreId: "costCentre" };
 const DISPOSAL_REASONS = ["SOLD", "SCRAPPED", "LOST", "DAMAGED", "WRITTEN_OFF", "TRANSFERRED", "OTHER"] as const;
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function format(value: unknown) {
   return value === null || value === undefined || value === "" ? "—" : String(value);
@@ -180,11 +176,6 @@ function display(asset: Asset, key: string) {
   return format(asset[key]);
 }
 
-const currentFy = (() => {
-  const now = new Date();
-  return now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
-})();
-
 export default function AssetsPage() {
   return (
     <Suspense fallback={null}>
@@ -209,34 +200,27 @@ function AssetsPageInner() {
   const [inspecting, setInspecting] = useState<Asset | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Period selection (requirement #8): a single Year + optional Month, OR a multi-year
-  // checklist. Either mode recomputes depreciation for the requested period(s) on the
-  // fly via the depreciation engine — nothing extra is stored per period.
-  const [periodMode, setPeriodMode] = useState<"single" | "multi">("single");
-  const [year, setYear] = useState(currentFy);
-  const [month, setMonth] = useState<number | "">("");
-  const [multiYears, setMultiYears] = useState<number[]>([currentFy]);
+  const [categories, setCategories] = useState<{ name: string; defaultTaxBlock?: string | null; usefulLifeYears?: number; method?: string }[]>([]);
+  const [taxBlocks, setTaxBlocks] = useState<{ name: string }[]>([]);
 
   const load = useCallback(async () => {
     const query = new URLSearchParams();
-    if (periodMode === "single") {
-      query.set("year", String(year));
-      if (month) query.set("month", String(month));
-    } else if (multiYears.length) {
-      query.set("years", multiYears.join(","));
-    }
     if (showDeleted) query.set("deleted", "1");
     try {
-      const [assets, masterValues] = await Promise.all([
+      const [assets, masterValues, cats, blocks] = await Promise.all([
         requestJson<{ data: Asset[] }>(`/api/assets?${query.toString()}`, { cache: "no-store" }),
         requestJson<{ data: Record<string, MasterItem[]> }>("/api/masters", { cache: "no-store" }),
+        requestJson<{ data: { name: string; defaultTaxBlock?: string | null; usefulLifeYears?: number; method?: string }[] }>("/api/asset-categories", { cache: "no-store" }),
+        requestJson<{ data: { name: string }[] }>("/api/tax-blocks", { cache: "no-store" }),
       ]);
       setRows(assets.data ?? []);
       setMasters(masterValues.data ?? {});
+      setCategories(cats.data ?? []);
+      setTaxBlocks(blocks.data ?? []);
     } catch (error) {
       toast.fromError(error, "Assets could not be loaded");
     }
-  }, [periodMode, year, month, multiYears, showDeleted, toast]);
+  }, [showDeleted, toast]);
 
   const searchParams = useSearchParams();
 
@@ -252,51 +236,6 @@ function AssetsPageInner() {
   useEffect(() => {
     if (searchParams.get("new") === "1") openEditor({ status: "AVAILABLE", itcEligible: false });
   }, [searchParams, openEditor]);
-
-  const yearChoices = useMemo(() => {
-    const years = new Set<number>();
-    for (let y = currentFy - 5; y <= currentFy + 1; y++) years.add(y);
-    return Array.from(years).sort((a, b) => a - b);
-  }, []);
-
-  const periodColumns = useMemo<TableColumn<Asset>[]>(() => {
-    const group = "Depreciation — Selected Period";
-    if (periodMode === "single") {
-      const figure = (asset: Asset) => asset.depreciationByYear?.[String(year)];
-      return [
-        {
-          key: "periodDep",
-          label: month ? `YTD Depreciation (thru ${MONTHS[month - 1]} FY${figure(rows[0])?.book.financialYear ?? ""})` : "Depreciation for Selected Year",
-          render: (asset) => money(month ? figure(asset)?.book.ytdDepreciation : figure(asset)?.book.depreciationForYear),
-          filterable: false,
-          group,
-        },
-        {
-          key: "periodNbv",
-          label: "Net Book Value (selected period)",
-          render: (asset) => money(figure(asset)?.book.netBookValue),
-          filterable: false,
-          group,
-        },
-        {
-          key: "periodTaxDep",
-          label: "Tax Depreciation (selected year)",
-          render: (asset) => money(figure(asset)?.tax.taxDepreciation),
-          filterable: false,
-          group,
-        },
-      ];
-    }
-    return [...multiYears]
-      .sort((a, b) => a - b)
-      .map((y) => ({
-        key: `year-${y}`,
-        label: `Depreciation FY ${y}-${String((y + 1) % 100).padStart(2, "0")}`,
-        render: (asset: Asset) => money(asset.depreciationByYear?.[String(y)]?.book.depreciationForYear),
-        filterable: false,
-        group,
-      }));
-  }, [periodMode, year, month, multiYears, rows]);
 
   const restore = useCallback(
     async (asset: Asset) => {
@@ -347,7 +286,7 @@ function AssetsPageInner() {
             { key: "deletedBy", label: "Deleted By", group: "Deletion History", render: (asset: Asset) => format(asset.deletedByEmail), filterValue: (asset: Asset) => asset.deletedByEmail },
             { key: "deleteReason", label: "Reason for Deletion", group: "Deletion History", render: (asset: Asset) => format(asset.deleteReason), filterValue: (asset: Asset) => asset.deleteReason },
           ]
-        : periodColumns),
+        : []),
       // Edit, then Delete, then the QR code at the extreme end of the row.
       {
         key: "actions",
@@ -406,7 +345,7 @@ function AssetsPageInner() {
           ) : "Pending",
       },
     ],
-    [periodColumns, showDeleted, canDelete, canRestore, busyId, restore, openEditor],
+    [showDeleted, canDelete, canRestore, busyId, restore, openEditor],
   );
 
   async function confirmDelete(reason: string) {
@@ -473,54 +412,19 @@ function AssetsPageInner() {
     }
   }
 
-  function toggleMultiYear(y: number) {
-    setMultiYears((current) => (current.includes(y) ? current.filter((value) => value !== y) : [...current, y].sort((a, b) => a - b)));
-  }
-
   const isRequired = (key: string) => (REQUIRED as readonly string[]).includes(key);
 
   return (
     <>
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold">Asset Register</h2>
-        <p className="text-sm text-stone-500">Capitalisation, custody, automatic depreciation, disposal, and QR identification.</p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold">Asset Register</h2>
+          <p className="text-sm text-stone-500">Capitalisation, custody, automatic depreciation, disposal, and QR identification.</p>
+        </div>
+        <ScanQrButton />
       </div>
 
-      <div className="card mb-4 flex flex-wrap items-end gap-4">
-        <div className="flex flex-wrap gap-2">
-          <button className={periodMode === "single" ? "btn-primary" : "btn"} onClick={() => setPeriodMode("single")}>Single period</button>
-          <button className={periodMode === "multi" ? "btn-primary" : "btn"} onClick={() => setPeriodMode("multi")}>Compare multiple years</button>
-        </div>
-        {periodMode === "single" ? (
-          <>
-            <label className="text-sm">
-              Year (FY starting April)
-              <select className="input mt-1" value={year} onChange={(event) => setYear(Number(event.target.value))}>
-                {yearChoices.map((y) => <option key={y} value={y}>FY {y}-{String((y + 1) % 100).padStart(2, "0")}</option>)}
-              </select>
-            </label>
-            <label className="text-sm">
-              Month (for YTD depreciation)
-              <select className="input mt-1" value={month} onChange={(event) => setMonth(event.target.value ? Number(event.target.value) : "")}>
-                <option value="">Full year</option>
-                {MONTHS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
-              </select>
-            </label>
-          </>
-        ) : (
-          <div>
-            <p className="text-sm font-medium">Select years to compare</p>
-            <div className="mt-1 flex flex-wrap gap-3">
-              {yearChoices.map((y) => (
-                <label key={y} className="flex items-center gap-1 text-sm">
-                  <input type="checkbox" checked={multiYears.includes(y)} onChange={() => toggleMultiYear(y)} />
-                  FY {y}-{String((y + 1) % 100).padStart(2, "0")}
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      <DepreciationPanel />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <button className="btn-primary" disabled={showDeleted} onClick={() => openEditor({ status: "AVAILABLE", itcEligible: false })}>+ Add asset</button>
@@ -651,7 +555,30 @@ function AssetsPageInner() {
                     }
                     return (
                       <Field key={key} label={label} required={isRequired(key)} error={error}>
-                        {key === "depreciationMethod" ? (
+                        {key === "category" || key === "taxBlock" ? (
+                          <select
+                            className={inputClass(Boolean(error))}
+                            value={String(editing[key] ?? "")}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              if (key === "category") {
+                                const found = categories.find((c) => c.name === value);
+                                setEditing((current) => ({
+                                  ...current,
+                                  category: value,
+                                  ...(found && !current?.taxBlock && found.defaultTaxBlock ? { taxBlock: found.defaultTaxBlock } : {}),
+                                  ...(found && !current?.usefulLife && found.usefulLifeYears ? { usefulLife: found.usefulLifeYears } : {}),
+                                  ...(found && !current?.depreciationMethod && found.method ? { depreciationMethod: found.method } : {}),
+                                }));
+                                setErrors((current) => (current.category ? { ...current, category: "" } : current));
+                              } else setField(key, value);
+                            }}
+                          >
+                            <option value="">{key === "category" ? "Select category" : "Use category default"}</option>
+                            {(key === "category" ? categories : taxBlocks).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+                            {Boolean(editing[key]) && !(key === "category" ? categories : taxBlocks).some((item) => item.name === editing[key]) && <option value={String(editing[key])}>{String(editing[key])}</option>}
+                          </select>
+                        ) : key === "depreciationMethod" ? (
                           <select className={inputClass(Boolean(error))} value={String(editing.depreciationMethod ?? "")} onChange={(event) => setField("depreciationMethod", event.target.value)}>
                             <option value="">Select method</option>
                             <option value="SLM">Straight Line Method (SLM)</option>

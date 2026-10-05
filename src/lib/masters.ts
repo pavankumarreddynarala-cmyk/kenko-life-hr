@@ -71,3 +71,6 @@ export const dynamicCodeRelation: Partial<Record<MasterType, "cityId" | "outletM
   department: "departmentId",
   employeeRole: "employeeRoleId",
 };
+
+/** Companies list in the order they were created, so "Kenko Life" stays first. Others sort by name (R9). */
+export const masterOrderBy = (type: MasterType): Record<string, "asc"> => (type === "company" ? { createdAt: "asc" } : { name: "asc" });

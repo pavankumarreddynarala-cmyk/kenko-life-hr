@@ -43,17 +43,17 @@ describe("book depreciation — SLM", () => {
     expect(computeAssetDepreciation(asset, 2026).book.closingAccumulatedDepreciation).toBe(108000);
   });
 
-  it("prorates the first year by months in use", () => {
+  it("prorates the first year by days in use", () => {
     const asset = { ...base, capitalisationDate: d("2024-10-01") };
-    // 6 months in use (Oct–Mar) out of the 36000 annual charge = 18000.
-    expect(computeAssetDepreciation(asset, 2024).book.depreciationForYear).toBe(18000);
+    // 182 days in use (1 Oct–31 Mar) of the 365-day year: 36000 × 182 / 365 = 17,950.68.
+    expect(computeAssetDepreciation(asset, 2024).book.depreciationForYear).toBe(17950.68);
   });
 
   it("gives a year-to-date figure through the selected month", () => {
     const asset = { ...base, capitalisationDate: d("2024-04-01") };
-    // Through September (6 months of FY2024-25 elapsed) = 18000 of the 36000 annual charge.
+    // Through September: 183 days of 365 → 36000 × 183 / 365 = 18,049.32 of the 36000 annual charge.
     const result = computeAssetDepreciation(asset, 2024, 9);
-    expect(result.book.ytdDepreciation).toBe(18000);
+    expect(result.book.ytdDepreciation).toBe(18049.32);
     expect(result.book.depreciationForYear).toBe(36000);
   });
 
@@ -153,10 +153,10 @@ describe("disposal", () => {
       disposalDate: d("2025-09-15"),
       saleProceeds: 70000,
     };
-    // At disposal (mid FY2025-26, 6 months used): accum dep = 36000 (FY24-25) + 18000 (6 months) = 54000.
-    // Book NBV at disposal = 120000 - 54000 = 66000. Profit = 70000 - 66000 = 4000.
+    // At disposal (15 Sep 2025, 168 days into FY2025-26): accum dep = 36000 + 36000 × 168 / 365
+    // (16,569.86) = 52,569.86. Book NBV at disposal = 67,430.14. Profit = 70000 - 67430.14 = 2,569.86.
     const result = computeAssetDepreciation(asset, 2025);
-    expect(result.book.accumulatedDepreciationOnDisposal).toBe(54000);
-    expect(result.profitLossOnDisposal).toBe(4000);
+    expect(result.book.accumulatedDepreciationOnDisposal).toBe(52569.86);
+    expect(result.profitLossOnDisposal).toBe(2569.86);
   });
 });

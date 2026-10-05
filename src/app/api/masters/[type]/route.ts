@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole, MANAGEMENT_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { describeUsage, isMasterType, masterDefinitions, masterSingular, usageCountSelect } from "@/lib/masters";
+import { describeUsage, isMasterType, masterDefinitions, masterOrderBy, masterSingular, usageCountSelect } from "@/lib/masters";
 import { masterSchema } from "@/lib/master-schema";
 import { apiError, validationError } from "@/lib/api-error";
 import { AppError } from "@/lib/app-error";
 
 type Row = { id: string; name: string; code: string; _count?: Record<string, number> };
 type Delegate = {
-  findMany: (args: { orderBy: { name: "asc" }; include?: unknown }) => Promise<Row[]>;
+  findMany: (args: { orderBy: Record<string, "asc">; include?: unknown }) => Promise<Row[]>;
   findFirst: (args: unknown) => Promise<Row | null>;
   create: (args: { data: { name: string; code: string } }) => Promise<Row>;
 };
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
     const { type } = await params;
     if (!isMasterType(type)) throw unknownMaster(type);
     const rows = await (masterDefinitions[type].delegate as unknown as Delegate).findMany({
-      orderBy: { name: "asc" },
+      orderBy: masterOrderBy(type),
       include: usageCountSelect(type),
     });
     const data = rows.map(({ _count, ...row }) => ({ ...row, usage: describeUsage(type, _count) }));
