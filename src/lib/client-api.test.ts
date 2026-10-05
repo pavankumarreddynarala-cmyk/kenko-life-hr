@@ -20,7 +20,7 @@ describe("requestJson", () => {
       ),
     );
 
-    await expect(requestJson("/api/otp")).rejects.toMatchObject({
+    await expect(requestJson("/api/auth/email")).rejects.toMatchObject({
       name: "ApiRequestError",
       status: 503,
       code: "DATABASE_NOT_CONFIGURED",
@@ -39,7 +39,7 @@ describe("requestJson", () => {
       ),
     );
 
-    await expect(requestJson("/api/otp")).rejects.toThrow(
+    await expect(requestJson("/api/auth/email")).rejects.toThrow(
       "The server could not complete this request",
     );
   });

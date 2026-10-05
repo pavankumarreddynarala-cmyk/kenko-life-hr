@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FIELD_MESSAGES, IFSC_REGEX, MOBILE_REGEX, PAN_REGEX, UAN_REGEX } from "@/lib/field-rules";
 
 export const INDIAN_STATES_AND_UTS = [
   "Andaman and Nicobar Islands",
@@ -39,19 +40,8 @@ export const INDIAN_STATES_AND_UTS = [
   "West Bengal",
 ] as const;
 
-export const phoneSchema = z
-  .string()
-  .trim()
-  .transform((value) => {
-    const digits = value.replace(/\D/g, "");
-    const national = digits.length === 12 && digits.startsWith("91")
-      ? digits.slice(2)
-      : digits.length === 11 && digits.startsWith("0")
-        ? digits.slice(1)
-        : digits;
-    return `+91${national}`;
-  })
-  .pipe(z.string().regex(/^\+91[6-9]\d{9}$/, "Enter a valid Indian mobile number"));
+// Stored as the bare 10-digit Indian mobile number (no +91, spaces or letters).
+export const phoneSchema = z.string().trim().regex(MOBILE_REGEX, FIELD_MESSAGES.phone);
 
 const optionalText = (max = 200) =>
   z.preprocess((value) => (value === "" || value === null ? undefined : value), z.string().trim().max(max).optional());
@@ -68,8 +58,8 @@ export const onboardingSchema = z.object({
   phone: phoneSchema,
   name: z.string().trim().min(2).max(120),
   dateOfBirth: z.coerce.date().refine((date) => date < new Date(), "Date of birth must be in the past"),
-  email: z.string().trim().email(),
-  pan: z.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, "Enter a valid PAN"),
+  email: z.string().trim().email().transform((value) => value.toLowerCase()),
+  pan: z.string().trim().toUpperCase().regex(PAN_REGEX, FIELD_MESSAGES.pan),
   aadhaar: z.string().transform((value) => value.replace(/\s/g, "")).pipe(z.string().regex(/^[2-9]\d{11}$/, "Enter a valid Aadhaar number")),
   address1: z.string().trim().min(3).max(200),
   address2: optionalText(200),
@@ -80,8 +70,14 @@ export const onboardingSchema = z.object({
 export const employeeAdminSchema = z.object({
   name: z.string().trim().min(2).max(120),
   phone: phoneSchema,
-  email: z.preprocess((value) => (value === "" || value === null ? undefined : value), z.string().email().optional()),
-  personalEmail: z.preprocess((value) => (value === "" || value === null ? undefined : value), z.string().email().optional()),
+  email: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().trim().email().transform((value) => value.toLowerCase()).optional(),
+  ),
+  personalEmail: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().trim().email().transform((value) => value.toLowerCase()).optional(),
+  ),
   teamOfficeCode: optionalText(30),
   fatherName: optionalText(120),
   gender: z.preprocess(
@@ -91,7 +87,7 @@ export const employeeAdminSchema = z.object({
   dateOfBirth: optionalDate,
   pan: z.preprocess(
     (value) => (value === "" || value === null ? undefined : value),
-    z.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/).optional(),
+    z.string().trim().toUpperCase().regex(PAN_REGEX, FIELD_MESSAGES.pan).optional(),
   ),
   aadhaar: z.preprocess(
     (value) => (value === "" || value === null ? undefined : value),
@@ -110,13 +106,19 @@ export const employeeAdminSchema = z.object({
   bankHolderName: optionalText(120),
   bankName: optionalText(120),
   accountNumber: optionalText(30),
-  ifscCode: optionalText(20),
+  ifscCode: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().trim().toUpperCase().regex(IFSC_REGEX, FIELD_MESSAGES.ifsc).optional(),
+  ),
   pfEligible: z.preprocess(
     (value) => value === true || value === "true" || value === "yes" || value === 1,
     z.boolean(),
   ).default(false),
   pfAccountNumber: optionalText(40),
-  uanNumber: optionalText(40),
+  uanNumber: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().trim().regex(UAN_REGEX, FIELD_MESSAGES.uan).optional(),
+  ),
   esicNumber: optionalText(40),
   numberOfOutlets: z.preprocess(
     (value) => (value === "" || value === null ? undefined : value),

@@ -1,24 +1,27 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { getVerifiedPhone, signPhoneVerification } from "./auth";
+import { getVerifiedEmail, signEmailVerification } from "./auth";
 
-describe("phone verification proof", () => {
+describe("email verification proof", () => {
   beforeAll(() => {
     process.env.JWT_SECRET = "test-secret-that-is-longer-than-32-characters";
   });
 
-  it("accepts only a signed phone verification token", () => {
-    const token = signPhoneVerification("+919876543210");
+  it("accepts only a signed email verification token", () => {
+    const token = signEmailVerification("employee@example.com", "supabase-user-1");
     const request = new NextRequest("http://localhost/api/employee/self", {
-      headers: { cookie: `kenko_phone_verified=${token}` },
+      headers: { cookie: `kenko_email_verified=${token}` },
     });
-    expect(getVerifiedPhone(request)).toBe("+919876543210");
+    expect(getVerifiedEmail(request)).toEqual({
+      email: "employee@example.com",
+      subject: "supabase-user-1",
+    });
   });
 
-  it("rejects a raw, forgeable phone cookie", () => {
+  it("rejects a raw, forgeable email cookie", () => {
     const request = new NextRequest("http://localhost/api/employee/self", {
-      headers: { cookie: "kenko_phone_verified=%2B919876543210" },
+      headers: { cookie: "kenko_email_verified=employee%40example.com" },
     });
-    expect(getVerifiedPhone(request)).toBeNull();
+    expect(getVerifiedEmail(request)).toBeNull();
   });
 });

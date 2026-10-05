@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ConfigurationError,
   requireDatabaseConfiguration,
-  requireOtpProviderConfiguration,
+  requireEmailAuthConfiguration,
 } from "./runtime-config";
 
 afterEach(() => {
@@ -20,26 +20,32 @@ describe("runtime configuration", () => {
     }
   });
 
-  it("defaults to development OTP outside production", () => {
-    vi.stubEnv("OTP_PROVIDER", "");
-    vi.stubEnv("NODE_ENV", "test");
-    expect(requireOtpProviderConfiguration()).toBe("development");
-  });
-
-  it("rejects development OTP in production", () => {
-    vi.stubEnv("OTP_PROVIDER", "development");
-    vi.stubEnv("NODE_ENV", "production");
-    expect(() => requireOtpProviderConfiguration()).toThrowError(
-      "Development OTP is disabled in production",
-    );
-  });
-
-  it("rejects placeholder Supabase settings", () => {
-    vi.stubEnv("OTP_PROVIDER", "supabase");
+  it("rejects placeholder Supabase email settings", () => {
     vi.stubEnv("SUPABASE_URL", "https://PROJECT_REF.supabase.co");
     vi.stubEnv("SUPABASE_ANON_KEY", "replace-with-supabase-anon-key");
-    expect(() => requireOtpProviderConfiguration()).toThrowError(
-      "Supabase OTP is selected",
+    vi.stubEnv("APP_URL", "http://localhost:3000");
+    expect(() => requireEmailAuthConfiguration()).toThrowError(
+      "Supabase email authentication is not configured",
     );
+  });
+
+  it("builds the employee callback from APP_URL", () => {
+    vi.stubEnv("SUPABASE_URL", "https://kenko.supabase.co/");
+    vi.stubEnv("SUPABASE_ANON_KEY", "valid-anon-key");
+    vi.stubEnv("APP_URL", "http://localhost:3000/base");
+    vi.stubEnv("NODE_ENV", "test");
+    expect(requireEmailAuthConfiguration()).toEqual({
+      url: "https://kenko.supabase.co",
+      anonKey: "valid-anon-key",
+      redirectUrl: "http://localhost:3000/employee",
+    });
+  });
+
+  it("requires HTTPS redirects in production", () => {
+    vi.stubEnv("SUPABASE_URL", "https://kenko.supabase.co");
+    vi.stubEnv("SUPABASE_ANON_KEY", "valid-anon-key");
+    vi.stubEnv("APP_URL", "http://example.com");
+    vi.stubEnv("NODE_ENV", "production");
+    expect(() => requireEmailAuthConfiguration()).toThrowError("APP_URL must use HTTPS");
   });
 });

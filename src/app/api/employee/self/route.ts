@@ -1,20 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { getSession, getVerifiedPhone, signSession } from "@/lib/auth";
+import { getSession, getVerifiedEmail, signSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { allocateEmployeeCode } from "@/lib/employees";
+import { findEmployeeIdByEmail } from "@/lib/employee-auth";
 import { onboardingSchema } from "@/lib/validators";
+import { safeAssetSelect } from "@/lib/transfers";
 
 const selfInclude = {
   assignments: {
     where: { returnedAt: null },
-    include: { asset: { include: { qr: true } } },
+    select: { id: true, assignedAt: true, custodianType: true, asset: { select: safeAssetSelect } },
     orderBy: { assignedAt: "desc" },
   },
   sentTransfers: {
     include: {
-      asset: true,
+      asset: { select: safeAssetSelect },
       sender: { select: { permanentId: true, name: true } },
       receiver: { select: { permanentId: true, name: true } },
     },
@@ -22,7 +24,7 @@ const selfInclude = {
   },
   receivedTransfers: {
     include: {
-      asset: true,
+      asset: { select: safeAssetSelect },
       sender: { select: { permanentId: true, name: true } },
       receiver: { select: { permanentId: true, name: true } },
     },
@@ -39,26 +41,32 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const verifiedPhone = getVerifiedPhone(req);
+  const verifiedEmail = getVerifiedEmail(req);
   const session = getSession(req);
-  if (!verifiedPhone && !session?.employeeId) {
-    return NextResponse.json({ error: "Verify your phone first" }, { status: 401 });
+  if (!verifiedEmail && !session?.employeeId) {
+    return NextResponse.json({ error: "Verify your email first" }, { status: 401 });
   }
   const parsed = onboardingSchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
-  if (verifiedPhone && parsed.data.phone !== verifiedPhone) {
-    return NextResponse.json({ error: "Phone must match the verified session" }, { status: 403 });
+  if (verifiedEmail && parsed.data.email !== verifiedEmail.email) {
+    return NextResponse.json({ error: "Email must match the verified session" }, { status: 403 });
   }
 
   try {
     const result = await db.$transaction(
       async (tx) => {
-        const existing = session?.employeeId
-          ? await tx.employee.findUnique({ where: { id: session.employeeId } })
-          : await tx.employee.findUnique({ where: { phone: parsed.data.phone } });
+        const matchedEmployeeId = verifiedEmail
+          ? await findEmployeeIdByEmail(tx, verifiedEmail.email)
+          : session?.employeeId ?? null;
+        const existing = matchedEmployeeId
+          ? await tx.employee.findUnique({ where: { id: matchedEmployeeId } })
+          : null;
         if (existing) {
-          if (!verifiedPhone && parsed.data.phone !== existing.phone) {
-            throw new Error("Verify the new mobile number before changing it");
+          const authenticatedEmails = [existing.email, existing.personalEmail]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.toLowerCase());
+          if (!verifiedEmail && !authenticatedEmails.includes(parsed.data.email)) {
+            throw new Error("Verify the new email address before changing it");
           }
           const employee = await tx.employee.update({ where: { id: existing.id }, data: parsed.data });
           await tx.employeeHistory.create({
@@ -66,7 +74,7 @@ export async function POST(req: NextRequest) {
           });
           await audit(
             {
-              actorId: session?.userId ?? existing.id,
+              actorId: verifiedEmail?.subject ?? session?.userId ?? existing.id,
               email: employee.email ?? undefined,
               role: "EMPLOYEE",
               module: "EMPLOYEE",
@@ -80,11 +88,26 @@ export async function POST(req: NextRequest) {
           );
           return employee;
         }
+        const conflictingIdentity = await tx.employee.findFirst({
+          where: {
+            OR: [
+              { phone: parsed.data.phone },
+              { pan: parsed.data.pan },
+              { aadhaar: parsed.data.aadhaar },
+            ],
+          },
+          select: { id: true },
+        });
+        if (conflictingIdentity) {
+          throw new Error(
+            "An employee record already uses this mobile, PAN, or Aadhaar. Contact HR to link your verified email.",
+          );
+        }
         const permanentId = await allocateEmployeeCode(tx);
         const employee = await tx.employee.create({ data: { ...parsed.data, permanentId } });
         await audit(
           {
-            actorId: employee.id,
+            actorId: verifiedEmail?.subject ?? employee.id,
             email: employee.email ?? undefined,
             role: "EMPLOYEE",
             module: "EMPLOYEE",
@@ -97,14 +120,13 @@ export async function POST(req: NextRequest) {
         );
         return employee;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     const response = NextResponse.json({ employee: result });
     response.cookies.set(
       "kenko_session",
       signSession({
-        userId: session?.userId ?? result.id,
-        email: result.email ?? result.phone,
+        userId: verifiedEmail?.subject ?? session?.userId ?? result.id,
+        email: result.email ?? verifiedEmail?.email ?? "",
         role: "EMPLOYEE",
         employeeId: result.id,
       }),
@@ -116,9 +138,15 @@ export async function POST(req: NextRequest) {
         path: "/",
       },
     );
-    response.cookies.delete("kenko_phone_verified");
+    response.cookies.delete("kenko_email_verified");
     return response;
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json(
+        { error: "These employee details are already registered. Contact HR to link your verified email." },
+        { status: 409 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to save employee details";
     return NextResponse.json({ error: message }, { status: 409 });
   }

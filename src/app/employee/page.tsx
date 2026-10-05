@@ -1,7 +1,9 @@
 "use client";
 
+import { fieldError } from "@/lib/field-rules";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FilterableTable, TableColumn } from "@/components/filterable-table";
+import { ScanQrButton } from "@/components/qr-scanner";
 import { INDIAN_STATES_AND_UTS } from "@/lib/validators";
 import { ApiRequestError, requestJson } from "@/lib/client-api";
 
@@ -48,13 +50,20 @@ function date(value: string) {
   return new Date(value).toLocaleDateString("en-IN");
 }
 
+const onlyDigits = (value: string) => value.replace(/\D/g, "");
+const onboardingRules: Record<string, { inputMode?: "numeric" | "text"; maxLength?: number; clean?: (v: string) => string; validate?: "pan" | "phone" }> = {
+  phone: { inputMode: "numeric", maxLength: 10, clean: onlyDigits, validate: "phone" },
+  pan: { maxLength: 10, clean: (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, ""), validate: "pan" },
+  aadhaar: { inputMode: "numeric", maxLength: 12, clean: onlyDigits },
+  pinCode: { inputMode: "numeric", maxLength: 6, clean: onlyDigits },
+};
+
 export default function EmployeePortalPage() {
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [stage, setStage] = useState<"phone" | "otp" | "onboarding" | "portal">("phone");
+  const [email, setEmail] = useState("");
+  const [stage, setStage] = useState<"email" | "emailSent" | "completing" | "onboarding" | "portal">("email");
   const [tab, setTab] = useState<"assets" | "requests">("assets");
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"send" | "verify" | "onboarding" | "request" | "resolve" | null>(null);
+  const [busy, setBusy] = useState<"send" | "complete" | "onboarding" | "request" | "resolve" | null>(null);
   const [employee, setEmployee] = useState<EmployeeSelf | null>(null);
   const [requestingAsset, setRequestingAsset] = useState<Asset | null>(null);
   const [request, setRequest] = useState({ receiverEmployeeCode: "", reason: "" });
@@ -87,47 +96,62 @@ export default function EmployeePortalPage() {
   }, []);
 
   useEffect(() => {
-    void loadSelf();
+    const parameters = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = parameters.get("access_token");
+    const authError = parameters.get("error_description");
+    if (!accessToken && !authError) {
+      void loadSelf();
+      return;
+    }
+
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    if (authError) {
+      setStage("email");
+      setMessage(authError);
+      return;
+    }
+
+    setStage("completing");
+    setBusy("complete");
+    setMessage("Verifying your secure email link…");
+    void requestJson<{ isNew: boolean; email: string }>("/api/auth/email/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken }),
+    })
+      .then(async (body) => {
+        setEmail(body.email);
+        if (body.isNew) {
+          setForm((current) => ({ ...current, email: body.email }));
+          setStage("onboarding");
+          setMessage("Email verified. Complete your employee profile.");
+          return;
+        }
+        await loadSelf();
+      })
+      .catch((error: unknown) => {
+        setStage("email");
+        setMessage(error instanceof Error ? error.message : "Unable to complete email sign-in.");
+      })
+      .finally(() => {
+        setBusy(null);
+      });
   }, [loadSelf]);
 
-  async function send() {
+  async function sendLoginEmail() {
     setMessage("");
     setBusy("send");
     try {
-      const body = await requestJson<{ message: string; phone: string }>("/api/otp", {
+      const body = await requestJson<{ message: string; email: string }>("/api/auth/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ email }),
       });
-      setPhone(body.phone);
+      setEmail(body.email);
       setMessage(body.message);
-      setStage("otp");
+      setStage("emailSent");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to send OTP.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function verify() {
-    setMessage("");
-    setBusy("verify");
-    try {
-      const body = await requestJson<{ isNew: boolean; phone: string }>("/api/otp/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, otp }),
-      });
-      setPhone(body.phone);
-      if (body.isNew) {
-        setForm((current) => ({ ...current, phone: body.phone }));
-        setStage("onboarding");
-        setMessage("Mobile verified. Complete your employee profile.");
-      } else {
-        await loadSelf();
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to verify OTP.");
+      setMessage(error instanceof Error ? error.message : "Unable to send the secure login email.");
     } finally {
       setBusy(null);
     }
@@ -254,39 +278,68 @@ export default function EmployeePortalPage() {
         <div className="card mx-auto mt-12 max-w-2xl">
           <p className="text-sm font-bold tracking-widest text-kenko-green">THE KENKO LIFE</p>
           <h1 className="mt-2 text-3xl font-bold">Employee Portal</h1>
-          <p className="mt-2 text-sm text-stone-500">Secure mobile OTP sign-in and employee onboarding.</p>
-          {stage === "phone" && (
+          <p className="mt-2 text-sm text-stone-500">Secure email sign-in and employee onboarding. No Employee ID is required.</p>
+          {stage === "email" && (
+            <form
+              className="mt-6 space-y-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void sendLoginEmail();
+              }}
+            >
+              <label className="block text-sm font-medium">
+                Email address
+                <input autoComplete="email" className="input mt-1" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
+              </label>
+              <p className="text-xs text-stone-500">We will email a one-time secure link. New employees can complete onboarding after verification.</p>
+              <button className="btn-primary w-full disabled:opacity-60" disabled={busy !== null} type="submit">{busy === "send" ? "Sending…" : "Email me a secure login link"}</button>
+            </form>
+          )}
+          {stage === "emailSent" && (
             <div className="mt-6 space-y-3">
-              <label className="text-sm font-medium">Mobile number</label>
-              <input autoComplete="tel" className="input" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="9876543210 or +919876543210" />
-              <p className="text-xs text-stone-500">Indian mobile numbers are normalized to the +91 format.</p>
-              <button className="btn-primary w-full disabled:opacity-60" disabled={busy !== null} onClick={send}>{busy === "send" ? "Sending…" : "Send OTP"}</button>
+              <p className="rounded-lg bg-green-50 p-4 text-sm text-green-900">A secure login link was sent to <strong>{email}</strong>. Open it in this browser to continue.</p>
+              <button className="w-full text-sm text-stone-500 underline" onClick={() => setStage("email")}>Use another email address</button>
             </div>
           )}
-          {stage === "otp" && (
-            <div className="mt-6 space-y-3">
-              <input className="input" inputMode="numeric" value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="Enter OTP" />
-              <button className="btn-primary w-full disabled:opacity-60" disabled={busy !== null} onClick={verify}>{busy === "verify" ? "Verifying…" : "Verify securely"}</button>
-              <button className="w-full text-sm text-stone-500 underline" onClick={() => setStage("phone")}>Use another number</button>
-            </div>
+          {stage === "completing" && (
+            <p className="mt-6 rounded-lg bg-green-50 p-4 text-sm text-green-900">Verifying your secure email link…</p>
           )}
           {stage === "onboarding" && (
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm">
+                Verified email address
+                <input className="input mt-1 bg-stone-100" disabled type="email" value={form.email} />
+              </label>
               {[
+                ["phone", "Mobile number", "text"],
                 ["name", "Name as per PAN card", "text"],
                 ["dateOfBirth", "Date of birth", "date"],
-                ["email", "Email ID", "email"],
                 ["pan", "PAN number", "text"],
                 ["aadhaar", "Aadhaar number", "text"],
                 ["address1", "Address line 1", "text"],
                 ["address2", "Address line 2", "text"],
                 ["pinCode", "PIN code", "text"],
-              ].map(([key, label, type]) => (
-                <label className="text-sm" key={key}>
-                  {label}
-                  <input className="input mt-1" required={key !== "address2"} type={type} value={form[key] ?? ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
-                </label>
-              ))}
+              ].map(([key, label, type]) => {
+                const rule = onboardingRules[key];
+                const error = rule?.validate ? fieldError(rule.validate, form[key], key === "phone") : "";
+                return (
+                  <label className="text-sm" key={key}>
+                    {label}
+                    <input
+                      aria-invalid={Boolean(error)}
+                      autoCapitalize={key === "pan" ? "characters" : undefined}
+                      className={`input mt-1 ${error ? "border-red-500" : ""}`}
+                      inputMode={rule?.inputMode}
+                      maxLength={rule?.maxLength}
+                      required={key !== "address2"}
+                      type={type}
+                      value={form[key] ?? ""}
+                      onChange={(event) => setForm({ ...form, [key]: rule?.clean ? rule.clean(event.target.value) : event.target.value })}
+                    />
+                    {error && <span className="mt-1 block text-xs text-red-700">{error}</span>}
+                  </label>
+                );
+              })}
               <label className="text-sm sm:col-span-2">
                 State / Union Territory
                 <select className="input mt-1" value={form.state} onChange={(event) => setForm({ ...form, state: event.target.value })}>
@@ -310,13 +363,14 @@ export default function EmployeePortalPage() {
           <div>
             <p className="text-xs font-bold tracking-widest text-kenko-green">EMPLOYEE PORTAL</p>
             <h1 className="text-3xl font-bold">{employee?.name}</h1>
-            <p className="text-sm text-stone-500">{employee?.permanentId} · {employee?.phone}</p>
+            <p className="text-sm text-stone-500">{employee?.permanentId} · {employee?.email || employee?.phone}</p>
           </div>
           <a className="btn" href="/login">Management sign in</a>
         </header>
-        <div className="mb-4 flex gap-2">
+        <div className="mb-4 flex items-center gap-2">
           <button className={tab === "assets" ? "btn-primary" : "btn"} onClick={() => setTab("assets")}>My Assets</button>
           <button className={tab === "requests" ? "btn-primary" : "btn"} onClick={() => setTab("requests")}>Requests</button>
+          <ScanQrButton className="ml-auto" />
         </div>
         <section className="card overflow-hidden p-0">
           {tab === "assets" ? (

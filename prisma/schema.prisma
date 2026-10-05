@@ -139,12 +139,14 @@ model Employee {
   @@index([departmentId])
   @@index([cityId])
   @@index([status])
+  @@index([createdAt])
 }
 
 model Company {
   id        String       @id @default(cuid())
   name      String       @unique
   code      String       @unique
+  active    Boolean      @default(true)
   employees Employee[]
   assets    FixedAsset[]
   createdAt DateTime     @default(now())
@@ -330,6 +332,7 @@ model FixedAsset {
   @@index([status, category])
   @@index([locationId])
   @@index([departmentId])
+  @@index([capitalisationDate])
 }
 
 model AssetAssignment {
@@ -454,4 +457,34 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, readAt, createdAt])
+}
+
+// Stage 2: depreciation masters (R13). Useful life, residual % and method are data, not code.
+model AssetCategory {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  usefulLifeYears  Int
+  residualPercent  Decimal  @default(5) @db.Decimal(5, 2)
+  method           String   @default("SLM")
+  defaultTaxBlock  String?
+  verified         Boolean  @default(false)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+}
+
+model TaxBlock {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  rate      Decimal  @db.Decimal(5, 2)
+  verified  Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt
 }

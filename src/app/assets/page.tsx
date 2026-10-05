@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Shell } from "@/components/shell";
 import { FilterableTable, TableColumn } from "@/components/filterable-table";
+import { DepreciationPanel } from "@/components/depreciation-panel";
+import { ScanQrButton } from "@/components/qr-scanner";
 
 type MasterItem = { id: string; name: string; code: string };
 type Asset = Record<string, unknown> & {
@@ -56,15 +58,23 @@ export default function AssetsPage() {
   const [masters, setMasters] = useState<Record<string, MasterItem[]>>({});
   const [editing, setEditing] = useState<Partial<Asset> | null>(null);
   const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState<{ name: string; defaultTaxBlock?: string | null }[]>([]);
+  const [taxBlocks, setTaxBlocks] = useState<{ name: string }[]>([]);
 
   const load = useCallback(async () => {
-    const [assetResponse, masterResponse] = await Promise.all([
+    const [assetResponse, masterResponse, categoryResponse, blockResponse] = await Promise.all([
       fetch("/api/assets", { cache: "no-store" }),
       fetch("/api/masters", { cache: "no-store" }),
+      fetch("/api/asset-categories", { cache: "no-store" }),
+      fetch("/api/tax-blocks", { cache: "no-store" }),
     ]);
-    const [assets, masterValues] = await Promise.all([assetResponse.json(), masterResponse.json()]);
+    const [assets, masterValues, cats, blocks] = await Promise.all([assetResponse.json(), masterResponse.json(), categoryResponse.json(), blockResponse.json()]);
     setRows(assets.data ?? []);
     setMasters(masterValues.data ?? {});
+    setCategories(cats.data ?? []);
+    setTaxBlocks(blocks.data ?? []);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -148,7 +158,7 @@ export default function AssetsPage() {
 
   return (
     <Shell>
-      <div className="mb-6 flex flex-wrap justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold">Asset Register</h2>
           <p className="text-sm text-stone-500">Capitalisation, custody, depreciation, disposal, and QR identification.</p>
@@ -156,15 +166,17 @@ export default function AssetsPage() {
         <div className="flex gap-2">
           <button className="btn-primary" onClick={() => setEditing({ status: "AVAILABLE", itcEligible: false })}>+ Add asset</button>
           <a className="btn-green" href="/api/export?type=assets">Export Excel</a>
+          <ScanQrButton />
         </div>
       </div>
+      <DepreciationPanel />
       <div className="card overflow-hidden p-0">
-        <FilterableTable rows={rows} columns={columns} emptyMessage="No assets found." />
+        <FilterableTable rows={rows} columns={columns} loading={loading} emptyMessage="No assets found." />
       </div>
       {notice && <p className="mt-4 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">{notice}</p>}
       {editing && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4">
-          <section className="mx-auto my-8 max-w-5xl rounded-2xl bg-white p-6 shadow-xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-2 sm:p-4">
+          <section className="mx-auto my-4 max-w-5xl rounded-2xl bg-white p-4 shadow-xl sm:my-8 sm:p-6">
             <div className="flex justify-between">
               <h3 className="text-xl font-bold">{editing.id ? "Edit fixed asset" : "Add fixed asset"}</h3>
               <button aria-label="Close" onClick={() => setEditing(null)}>×</button>
@@ -172,7 +184,7 @@ export default function AssetsPage() {
             {groups.map((group) => (
               <fieldset className="mt-5" key={group.title}>
                 <legend className="font-bold text-kenko-green">{group.title}</legend>
-                <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {group.fields.map(([key, label]) => (
                     <label className="text-sm" key={key}>
                       {label}
@@ -181,10 +193,25 @@ export default function AssetsPage() {
                           <option value="no">No</option>
                           <option value="yes">Yes</option>
                         </select>
+                      ) : key === "category" || key === "taxBlock" ? (
+                        <select
+                          required={key === "category"}
+                          className="input mt-1"
+                          value={String(editing[key] ?? "")}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            const fill = key === "category" && !editing.taxBlock ? categories.find((c) => c.name === value)?.defaultTaxBlock : undefined;
+                            setEditing({ ...editing, [key]: value, ...(fill ? { taxBlock: fill } : {}) });
+                          }}
+                        >
+                          <option value="">{key === "category" ? "Select category" : "Use category default"}</option>
+                          {(key === "category" ? categories : taxBlocks).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+                          {Boolean(editing[key]) && !(key === "category" ? categories : taxBlocks).some((item) => item.name === editing[key]) && <option value={String(editing[key])}>{String(editing[key])}</option>}
+                        </select>
                       ) : masterFields[key] ? (
                         <select className="input mt-1" value={String(editing[key] ?? "")} onChange={(event) => setEditing({ ...editing, [key]: event.target.value })}>
                           <option value="">Select {label.toLowerCase()}</option>
-                          {(masters[masterFields[key]] ?? []).map((item) => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}
+                          {(masters[masterFields[key]] ?? []).filter((item) => (item as MasterItem & { active?: boolean }).active !== false || item.id === editing[key]).map((item) => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}
                         </select>
                       ) : (
                         <input

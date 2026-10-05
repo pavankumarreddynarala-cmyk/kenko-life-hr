@@ -1,100 +1,68 @@
-import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { readSessionToken } from "@/lib/auth";
+import { loadAssetForScan, tokenFromScan, viewerFor } from "@/lib/asset-view";
 
-function display(value: unknown) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (value instanceof Date) return value.toLocaleDateString("en-IN");
-  return String(value);
-}
+export const dynamic = "force-dynamic"; // always the live record
 
+// Opened when a QR code is read by a phone's own camera app (the in-portal scanner uses /api/qr-scan).
+// ADMIN sees every group; everyone else signed in sees Group 1, Group 2 and the custodian. No session, no data.
 export default async function AssetQrPage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = await params;
+  const { token: raw } = await params;
+  const token = tokenFromScan(raw);
+  if (!token) return notFound();
   const cookieStore = await cookies();
   const session = readSessionToken(cookieStore.get("kenko_session")?.value);
-  const canViewSensitive = Boolean(session && ["ADMIN", "HR", "CFO"].includes(session.role));
-  const qr = await db.assetQRCode.findUnique({
-    where: { token },
-    include: {
-      asset: {
-        include: {
-          company: true,
-          location: true,
-          department: true,
-          costCentre: true,
-          assignments: {
-            where: { returnedAt: null },
-            include: { employee: { select: { permanentId: true, name: true } } },
-            take: 1,
-          },
-        },
-      },
-    },
-  });
-  if (!qr) return notFound();
-  const asset = qr.asset;
-  const custodian = asset.assignments[0]?.employee;
-  const publicDetails: [string, unknown][] = [
-    ["Asset ID", asset.faId],
-    ["Category", asset.category],
-    ["Description", asset.description],
-    ["Make / model", asset.makeModel],
-    ["Serial number", asset.serialNo],
-    ["Status", asset.status],
-    ["Last updated", asset.updatedAt],
-  ];
-  const sensitiveDetails: [string, unknown][] = [
-    ["Company", asset.company?.name],
-    ["Location", asset.location?.name],
-    ["Department", asset.department?.name],
-    ["Cost centre", asset.costCentre?.name],
-    ["Custodian", custodian ? `${custodian.permanentId} · ${custodian.name}` : asset.assignments[0]?.custodianName],
-    ["Vendor", asset.vendorName],
-    ["Invoice number", asset.invoiceNo],
-    ["Invoice date", asset.invoiceDate],
-    ["Capitalisation date", asset.capitalisationDate],
-    ["PO / GRN", asset.poGrnNo],
-    ["Purchase cost", asset.purchaseCost],
-    ["Freight", asset.freight],
-    ["Installation cost", asset.installationCost],
-    ["Other cost", asset.otherCost],
-    ["Total capitalised cost", asset.totalCapitalisedCost],
-    ["GST amount", asset.gstAmount],
-    ["ITC eligible", asset.itcEligible ? "Yes" : "No"],
-    ["ITC availed", asset.itcAvailed],
-    ["Depreciation method", asset.depreciationMethod],
-    ["Useful life", asset.usefulLife],
-    ["Residual value", asset.residualValue],
-    ["Net book value", asset.netBookValue],
-    ["Tax block", asset.taxBlock],
-    ["Closing WDV", asset.closingWdv],
-    ["Disposal date", asset.disposalDate],
-    ["Disposal method", asset.disposalMethod],
-    ["Sale proceeds", asset.saleProceeds],
-    ["Verification date", asset.verificationDate],
-    ["Verification status", asset.verificationStatus],
-  ];
-  const details = canViewSensitive ? [...publicDetails, ...sensitiveDetails] : publicDetails;
+  if (!session) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-kenko-cream p-4">
+        <section className="card w-full max-w-md text-center">
+          <p className="text-xs font-bold tracking-widest text-kenko-green">THE KENKO LIFE · ASSET REGISTER</p>
+          <h1 className="mt-2 text-2xl font-bold">Sign in to view this asset</h1>
+          <p className="mt-2 text-sm text-stone-500">Asset details are shown only to signed-in staff.</p>
+          <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <a className="btn-primary" href="/employee">Employee sign in</a>
+            <a className="btn" href="/login">Management sign in</a>
+          </div>
+        </section>
+      </main>
+    );
+  }
+  const data = await loadAssetForScan(token, viewerFor(session.role));
+  if (!data) return notFound();
+  const faId = data.groups[0]?.fields.find((f) => f.label === "Asset ID")?.value;
   return (
-    <main className="min-h-screen bg-kenko-cream p-5">
-      <section className="card mx-auto my-10 max-w-4xl">
+    <main className="min-h-screen bg-kenko-cream p-3 sm:p-5">
+      <section className="card mx-auto my-4 max-w-4xl sm:my-10">
         <p className="text-xs font-bold tracking-widest text-kenko-green">THE KENKO LIFE · ASSET REGISTER</p>
-        <h1 className="mt-2 text-3xl font-bold">{asset.faId}</h1>
-        <p className="mt-1 text-sm text-stone-500">Authoritative asset details from the live register.</p>
-        <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {details.map(([label, value]) => (
-            <div className="rounded-xl bg-stone-50 p-3" key={label}>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
-              <dd className="mt-1 break-words text-sm font-medium">{display(value)}</dd>
-            </div>
-          ))}
-        </dl>
-        {!canViewSensitive && (
-          <p className="mt-6 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">
-            Sign in as an authorized manager to view custody and financial details.
-          </p>
-        )}
+        <h1 className="mt-2 break-words text-2xl font-bold sm:text-3xl">{faId}</h1>
+        <p className="mt-1 text-sm text-stone-500">Live record, last updated {new Date(data.updatedAt).toLocaleString("en-IN")}{data.status ? ` · ${data.status}` : ""}</p>
+        {data.groups.map((group) => (
+          <div className="mt-6" key={group.id}>
+            <h2 className="mb-2 text-sm font-bold text-kenko-green">{group.title}</h2>
+            <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {group.fields.map((field) => (
+                <div className="rounded-xl bg-stone-50 p-3" key={field.label}>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">{field.label}</dt>
+                  <dd className="mt-1 break-words text-sm font-medium">{field.value ?? "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+        <div className="mt-6">
+          <h2 className="mb-2 text-sm font-bold text-kenko-green">Custodian · whose asset it is</h2>
+          {data.custodian ? (
+            <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-xl bg-stone-50 p-3"><dt className="text-xs font-semibold uppercase text-stone-500">Name</dt><dd className="mt-1 text-sm font-medium">{data.custodian.name ?? "—"}</dd></div>
+              <div className="rounded-xl bg-stone-50 p-3"><dt className="text-xs font-semibold uppercase text-stone-500">Employee code</dt><dd className="mt-1 text-sm font-medium">{data.custodian.code ?? data.custodian.type}</dd></div>
+              <div className="rounded-xl bg-stone-50 p-3"><dt className="text-xs font-semibold uppercase text-stone-500">Held since</dt><dd className="mt-1 text-sm font-medium">{data.custodian.since}</dd></div>
+            </dl>
+          ) : (
+            <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">Not assigned to anyone.</p>
+          )}
+        </div>
+        {data.viewer === "LIMITED" && <p className="mt-6 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">Cost, depreciation and other financial details are available to administrators only.</p>}
       </section>
     </main>
   );

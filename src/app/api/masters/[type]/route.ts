@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { isMasterType, masterDefinitions } from "@/lib/masters";
+import { isMasterType, masterDefinitions, masterOrderBy } from "@/lib/masters";
 import { z } from "zod";
 import { apiError } from "@/lib/api-error";
 const masterSchema = z.object({ name: z.string().trim().min(2).max(120), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/) });
-type Delegate = { findMany: (args: { orderBy: { name: "asc" } }) => Promise<unknown[]>; create: (args: { data: { name: string; code: string } }) => Promise<{ id: string; name: string; code: string }> };
-export async function GET(req: NextRequest, { params }: { params: Promise<{ type: string }> }) { try { requireRole(req, ["ADMIN", "HR", "CFO"]); const { type } = await params; if (!isMasterType(type)) return NextResponse.json({ error: "Unknown master" }, { status: 404 }); const data = await (masterDefinitions[type].delegate as unknown as Delegate).findMany({ orderBy: { name: "asc" } }); return NextResponse.json({ data, label: masterDefinitions[type].label }); } catch (error) { return apiError(error, "Unable to load master data"); } }
+type Delegate = { findMany: (args: { orderBy: Record<string, "asc"> }) => Promise<unknown[]>; create: (args: { data: { name: string; code: string } }) => Promise<{ id: string; name: string; code: string }> };
+export async function GET(req: NextRequest, { params }: { params: Promise<{ type: string }> }) { try { requireRole(req, ["ADMIN", "HR", "CFO"]); const { type } = await params; if (!isMasterType(type)) return NextResponse.json({ error: "Unknown master" }, { status: 404 }); const data = await (masterDefinitions[type].delegate as unknown as Delegate).findMany({ orderBy: masterOrderBy(type) }); return NextResponse.json({ data, label: masterDefinitions[type].label }); } catch (error) { return apiError(error, "Unable to load master data"); } }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ type: string }> }) {
   try {
     const session = requireRole(req, ["ADMIN"]);

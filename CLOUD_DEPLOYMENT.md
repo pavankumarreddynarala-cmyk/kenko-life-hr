@@ -8,7 +8,7 @@ This application is designed for one shared PostgreSQL database. That is what ma
 | --- | --- | --- |
 | Application | Vercel (Mumbai region) | HTTPS Next.js application with automatic deployments |
 | Database | Neon, Supabase, AWS RDS, or Vercel Postgres | Managed PostgreSQL database shared by all users |
-| OTP | MSG91, Twilio, or a verified WhatsApp/SMS provider | Production OTP delivery |
+| Employee authentication | Supabase Auth + custom SMTP | Email magic-link delivery |
 | Rate limiting | Upstash Redis | Durable throttling across cloud instances |
 | Files | S3 / Vercel Blob | Staged Excel imports and generated exports |
 
@@ -17,9 +17,10 @@ This application is designed for one shared PostgreSQL database. That is what ma
 1. Put `kenko-life-hr` in a private GitHub repository.
 2. Import that repository in the organisation's Vercel account, then set the root directory to `kenko-life-hr`.
 3. Provision a managed PostgreSQL database and add its pooled connection string as `DATABASE_URL`.
-4. Set `JWT_SECRET` to a unique 32+ character secret. Configure either `OTP_PROVIDER=supabase` with `SUPABASE_URL` and `SUPABASE_ANON_KEY`, or `OTP_PROVIDER=twilio` with all three `TWILIO_*` variables. Do **not** use `DEV_OTP`.
-5. Run `npx prisma migrate deploy` against the production database. The migration installs constraints, indexes, generated timestamp/CODE triggers, and RLS policies. Run the seed script only for a private demo.
-6. Assign your custom domain and use Vercel's HTTPS redirect.
+4. Set `JWT_SECRET` to a unique 32+ character secret and configure `APP_URL`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY`.
+5. In Supabase Auth, enable Email with confirmation, leave password-based employee sign-in disabled, configure custom SMTP, and add `${APP_URL}/employee` to the allowed redirect URLs.
+6. Run `npx prisma migrate deploy` against the production database. The migration installs constraints, indexes, generated timestamp/CODE triggers, and RLS policies. Run the seed script only for a private demo.
+7. Assign your custom domain and use Vercel's HTTPS redirect.
 
 Never use the local demo password in production. Replace management authentication with your approved identity provider or carefully managed password reset workflow before inviting staff.
 

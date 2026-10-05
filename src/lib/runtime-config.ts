@@ -30,51 +30,39 @@ export function requireDatabaseConfiguration() {
   }
 }
 
-export type OtpProvider = "development" | "supabase" | "twilio";
+export function requireEmailAuthConfiguration() {
+  if (
+    !configured(process.env.SUPABASE_URL, ["PROJECT_REF", "replace-with"]) ||
+    !configured(process.env.SUPABASE_ANON_KEY, ["replace-with", "PROJECT_REF"])
+  ) {
+    throw new ConfigurationError(
+      "SUPABASE_EMAIL_AUTH_NOT_CONFIGURED",
+      "Supabase email authentication is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+    );
+  }
 
-export function requireOtpProviderConfiguration(): OtpProvider {
-  const value = process.env.OTP_PROVIDER?.trim().toLowerCase();
-  if (!value) {
-    if (process.env.NODE_ENV !== "production") return "development";
-    throw new ConfigurationError("OTP_PROVIDER_NOT_CONFIGURED", "OTP_PROVIDER is required in production.");
-  }
-  if (value !== "development" && value !== "supabase" && value !== "twilio") {
+  const appUrl = process.env.APP_URL?.trim();
+  if (!appUrl) {
     throw new ConfigurationError(
-      "OTP_PROVIDER_INVALID",
-      "OTP_PROVIDER must be development, supabase, or twilio.",
+      "APP_URL_NOT_CONFIGURED",
+      "APP_URL is required for the Supabase email login redirect.",
     );
   }
-  if (value === "development") {
-    if (process.env.NODE_ENV === "production") {
-      throw new ConfigurationError(
-        "DEVELOPMENT_OTP_DISABLED",
-        "Development OTP is disabled in production. Configure Supabase Phone Auth or Twilio Verify.",
-      );
-    }
-    return value;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(appUrl);
+  } catch {
+    throw new ConfigurationError("APP_URL_INVALID", "APP_URL must be an absolute URL.");
   }
-  if (
-    value === "supabase" &&
-    (!configured(process.env.SUPABASE_URL, ["PROJECT_REF", "replace-with"]) ||
-      !configured(process.env.SUPABASE_ANON_KEY, ["replace-with", "PROJECT_REF"]))
-  ) {
-    throw new ConfigurationError(
-      "SUPABASE_OTP_NOT_CONFIGURED",
-      "Supabase OTP is selected but SUPABASE_URL or SUPABASE_ANON_KEY is missing.",
-    );
+  if (process.env.NODE_ENV === "production" && parsedUrl.protocol !== "https:") {
+    throw new ConfigurationError("APP_URL_INSECURE", "APP_URL must use HTTPS in production.");
   }
-  if (
-    value === "twilio" &&
-    (!configured(process.env.TWILIO_ACCOUNT_SID, ["xxxxxxxx", "replace-with"]) ||
-      !configured(process.env.TWILIO_AUTH_TOKEN, ["replace-with"]) ||
-      !configured(process.env.TWILIO_VERIFY_SERVICE_SID, ["xxxxxxxx", "replace-with"]))
-  ) {
-    throw new ConfigurationError(
-      "TWILIO_OTP_NOT_CONFIGURED",
-      "Twilio OTP is selected but TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID is missing.",
-    );
-  }
-  return value;
+
+  return {
+    url: process.env.SUPABASE_URL!.replace(/\/+$/, ""),
+    anonKey: process.env.SUPABASE_ANON_KEY!,
+    redirectUrl: new URL("/employee", parsedUrl).toString(),
+  };
 }
 
 export function publicConfigurationMessage(error: ConfigurationError) {

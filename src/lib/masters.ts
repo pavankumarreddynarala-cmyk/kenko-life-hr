@@ -18,3 +18,6 @@ export type MasterType = keyof typeof masterDefinitions;
 export function isMasterType(type: string): type is MasterType {
   return Object.prototype.hasOwnProperty.call(masterDefinitions, type);
 }
+
+/** Companies list in the order they were created, so "Kenko Life" stays first. Others sort by name. */
+export const masterOrderBy = (type: MasterType): Record<string, "asc"> => (type === "company" ? { createdAt: "asc" } : { name: "asc" });
