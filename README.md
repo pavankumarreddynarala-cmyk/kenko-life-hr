@@ -16,7 +16,7 @@ A Next.js 15 portal for governed employee master data, fixed assets, employee-to
 
 3. Run `npm run dev`. The site root (`/`) redirects to the management sign-in (`/login`); employees use `/employee/login` for email OTP access.
 
-The development seed creates administrator, HR, and CFO accounts with password `KenkoDemo!2026`. Remove or rotate these accounts before deployment. `OTP_PROVIDER=development` accepts the server-side `DEV_OTP` only outside production.
+There are no default or sample accounts. The first administrator (`pavan@thekenkolife.com`, or `SUPER_ADMIN_EMAIL`) is created once with `BOOTSTRAP_ADMIN_PASSWORD=... npm run bootstrap:admin`; that account then creates every other login from the **Logins** page. `OTP_PROVIDER=development` accepts the server-side `DEV_OTP` only outside production.
 
 ### Test employee OTP locally
 

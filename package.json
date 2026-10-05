@@ -12,13 +12,15 @@
     "test": "vitest run",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts",
+    "bootstrap:admin": "tsx prisma/bootstrap-admin.ts",
+    "purge:all": "tsx prisma/purge-all.ts",
     "import:legacy": "tsx prisma/import-legacy.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
+    "jsqr": "^1.4.0",
     "jszip": "^3.10.2",
     "next": "^15.1.4",
     "qrcode": "^1.5.4",

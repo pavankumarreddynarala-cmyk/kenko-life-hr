@@ -96,3 +96,14 @@ export function requireEmployeeOwnership(request: NextRequest, employeeId: strin
   }
   return session;
 }
+
+/** R1: the only account allowed to create or reset logins. Configurable, defaults to pavan@thekenkolife.com. */
+export const superAdminEmail = () => (process.env.SUPER_ADMIN_EMAIL || "pavan@thekenkolife.com").trim().toLowerCase();
+export const isSuperAdmin = (session: { role: string; email: string } | null | undefined) =>
+  !!session && session.role === "ADMIN" && session.email.toLowerCase() === superAdminEmail();
+
+export function requireSuperAdmin(request: NextRequest) {
+  const session = requireRole(request, ["ADMIN"]);
+  if (!isSuperAdmin(session)) throw forbidden("Only the main administrator account can create or reset logins.");
+  return session;
+}

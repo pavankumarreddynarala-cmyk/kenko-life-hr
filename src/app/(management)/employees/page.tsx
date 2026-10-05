@@ -10,9 +10,10 @@ import { useToast } from "@/components/toast";
 import { fieldErrorMap, jsonBody, requestJson } from "@/lib/client-api";
 import { describeMissing, requiredErrors, type FormErrors } from "@/lib/form-validation";
 import { FIELD_LABELS } from "@/lib/field-labels";
+import { fieldError, normalizeIfsc, normalizePan } from "@/lib/field-rules";
 import { INDIAN_STATES_AND_UTS } from "@/lib/validators";
 
-type MasterItem = { id: string; name: string; code: string };
+type MasterItem = { id: string; name: string; code: string; active?: boolean };
 type MasterData = Record<string, MasterItem[]>;
 type Employee = Record<string, unknown> & {
   id: string;
@@ -70,6 +71,17 @@ const textFields = [
   ["esicNumber", "ESIC number", ""],
 ] as const;
 
+// Input behaviour per field (R5–R8): the right keyboard on phones, upper-casing and length limits.
+// The same rules run again on the server, so nothing invalid can be saved by any route.
+const INPUT_RULES: Record<string, { inputMode?: "numeric" | "text"; maxLength?: number; transform?: (value: string) => string; autoCapitalize?: string }> = {
+  phone: { inputMode: "numeric", maxLength: 10, transform: (value) => value.replace(/\D/g, "").slice(0, 10) },
+  pan: { maxLength: 10, autoCapitalize: "characters", transform: (value) => normalizePan(value).slice(0, 10) },
+  ifscCode: { maxLength: 11, autoCapitalize: "characters", transform: (value) => normalizeIfsc(value).slice(0, 11) },
+  uanNumber: { inputMode: "numeric", maxLength: 12, transform: (value) => value.replace(/\D/g, "").slice(0, 12) },
+  pinCode: { inputMode: "numeric", maxLength: 6, transform: (value) => value.replace(/\D/g, "").slice(0, 6) },
+};
+const RULE_FIELDS = { pan: "pan", phone: "phone", ifscCode: "ifsc", uanNumber: "uan" } as const;
+
 // Fields the form refuses to submit without (the server enforces the same list).
 const REQUIRED = ["name", "phone"] as const;
 const LABELS: Record<string, string> = {
@@ -103,6 +115,7 @@ function EmployeesPageInner() {
   const toast = useToast();
   const [rows, setRows] = useState<Employee[]>([]);
   const [masters, setMasters] = useState<MasterData>({});
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Employee> | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
@@ -123,14 +136,27 @@ function EmployeesPageInner() {
         setMasters(masterValues.data ?? {});
       } catch (error) {
         toast.fromError(error, "Employees could not be loaded");
+      } finally {
+        setLoading(false);
       }
     },
     [toast],
   );
 
+  // R9: re-read the masters when the form opens so a company just added in Master Data shows up at once.
+  const refreshMasters = useCallback(async () => {
+    try {
+      const body = await requestJson<{ data: MasterData }>("/api/masters", { cache: "no-store" });
+      setMasters(body.data ?? {});
+    } catch {
+      // The list loaded earlier is still usable.
+    }
+  }, []);
+
   const searchParams = useSearchParams();
 
   useEffect(() => {
+    setLoading(true);
     void load(showDeleted);
   }, [load, showDeleted]);
 
@@ -138,10 +164,14 @@ function EmployeesPageInner() {
     if (searchParams.get("new") === "1") setEditing({ pfEligible: false, status: "ACTIVE" });
   }, [searchParams]);
 
-  function openEditor(next: Partial<Employee> | null) {
-    setErrors({});
-    setEditing(next);
-  }
+  const openEditor = useCallback(
+    (next: Partial<Employee> | null) => {
+      setErrors({});
+      setEditing(next);
+      if (next) void refreshMasters();
+    },
+    [refreshMasters],
+  );
 
   async function confirmDelete(reason: string) {
     if (!deleting) return;
@@ -252,14 +282,24 @@ function EmployeesPageInner() {
       { key: "deletedBy", label: "Deleted By", render: (row) => format(row.deletedByEmail), filterValue: (row) => row.deletedByEmail },
       { key: "deleteReason", label: "Reason for Deletion", render: (row) => format(row.deleteReason), filterValue: (row) => row.deleteReason },
     ];
-  }, [showDeleted, busyId, restore]);
+  }, [showDeleted, busyId, restore, openEditor]);
 
   async function save() {
     if (!editing) return;
-    const missing = requiredErrors(editing, REQUIRED, LABELS);
+    const missing: FormErrors = requiredErrors(editing, REQUIRED, LABELS);
+    for (const [key, rule] of Object.entries(RULE_FIELDS)) {
+      const message = fieldError(rule, editing[key]);
+      if (message && !missing[key]) missing[key] = message;
+    }
+    if (editing.status === "EXITED") {
+      if (!editing.exitDate) missing.exitDate = "Enter the last working day — it is required when the status is Exit.";
+      else if (editing.joiningDate && String(editing.exitDate) < String(editing.joiningDate)) {
+        missing.exitDate = "The last working day cannot be earlier than the joining date.";
+      }
+    }
     if (Object.keys(missing).length) {
       setErrors(missing);
-      toast.error(`Fill in the required fields before saving: ${describeMissing(missing, LABELS)}.`, {
+      toast.error(`Fix these fields before saving: ${describeMissing(missing, LABELS)}.`, {
         title: "Employee not saved",
       });
       return;
@@ -283,7 +323,8 @@ function EmployeesPageInner() {
   }
 
   function setField(key: string, value: unknown) {
-    setEditing((current) => ({ ...current, [key]: value }));
+    const next = typeof value === "string" && INPUT_RULES[key]?.transform ? INPUT_RULES[key].transform!(value) : value;
+    setEditing((current) => ({ ...current, [key]: next }));
     setErrors((current) => (current[key] ? { ...current, [key]: "" } : current));
   }
 
@@ -308,7 +349,7 @@ function EmployeesPageInner() {
         </label>
       </div>
       <div className="card overflow-hidden p-0">
-        <FilterableTable rows={rows} columns={columns} emptyMessage={showDeleted ? "No deleted employees." : "No employees found."} />
+        <FilterableTable rows={rows} columns={columns} loading={loading} emptyMessage={showDeleted ? "No deleted employees." : "No employees found."} />
       </div>
 
       {deleting && (
@@ -400,15 +441,25 @@ function EmployeesPageInner() {
               )}
               {textFields.map(([key, label, hint]) => (
                 <Field key={key} label={label} required={isRequired(key)} error={errors[key]} hint={hint || undefined}>
-                  <input className={inputClass(Boolean(errors[key]))} value={String(editing[key] ?? "")} onChange={(event) => setField(key, event.target.value)} />
+                  <input
+                    className={inputClass(Boolean(errors[key]))}
+                    value={String(editing[key] ?? "")}
+                    inputMode={INPUT_RULES[key]?.inputMode}
+                    maxLength={INPUT_RULES[key]?.maxLength}
+                    autoCapitalize={INPUT_RULES[key]?.autoCapitalize}
+                    autoComplete="off"
+                    onChange={(event) => setField(key, event.target.value)}
+                  />
                 </Field>
               ))}
               {masterFields.map(([key, label, masterKey]) => (
                 <Field key={key} label={label} error={errors[key]}>
                   <select className={inputClass(Boolean(errors[key]))} value={String(editing[key] ?? "")} onChange={(event) => setField(key, event.target.value)}>
                     <option value="">Select {label.toLowerCase()}</option>
-                    {(masters[masterKey] ?? []).map((item) => (
-                      <option value={item.id} key={item.id}>{item.code} · {item.name}</option>
+                    {(masters[masterKey] ?? [])
+                      .filter((item) => item.active !== false || item.id === editing[key])
+                      .map((item) => (
+                      <option value={item.id} key={item.id}>{item.code} · {item.name}{item.active === false ? " (inactive)" : ""}</option>
                     ))}
                   </select>
                 </Field>
@@ -418,7 +469,6 @@ function EmployeesPageInner() {
               </Field>
               {[
                 ["joiningDate", "Date of joining"],
-                ["exitDate", "Last day of working"],
                 ["dateOfBirth", "Date of birth"],
               ].map(([key, label]) => (
                 <Field key={key} label={label} error={errors[key]}>
@@ -444,9 +494,20 @@ function EmployeesPageInner() {
                 <select className={inputClass(Boolean(errors.status))} value={String(editing.status ?? "ACTIVE")} onChange={(event) => setField("status", event.target.value)}>
                   <option value="ACTIVE">Active</option>
                   <option value="ON_LEAVE">On leave</option>
-                  <option value="EXITED">Exited</option>
+                  <option value="EXITED">Exit</option>
                 </select>
               </Field>
+              {editing.status === "EXITED" && (
+                <Field label="Last day of working" required error={errors.exitDate} hint="Required for exited employees. Cannot be before the joining date.">
+                  <input
+                    className={inputClass(Boolean(errors.exitDate))}
+                    type="date"
+                    min={editing.joiningDate ? String(editing.joiningDate).slice(0, 10) : undefined}
+                    value={String(editing.exitDate ?? "")}
+                    onChange={(event) => setField("exitDate", event.target.value)}
+                  />
+                </Field>
+              )}
               <Field label="PF eligible">
                 <select className={inputClass()} value={editing.pfEligible ? "yes" : "no"} onChange={(event) => setField("pfEligible", event.target.value === "yes")}>
                   <option value="no">No</option>

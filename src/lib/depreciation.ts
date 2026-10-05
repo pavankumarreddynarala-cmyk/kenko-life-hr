@@ -33,7 +33,14 @@
  *      in company accounts. No tax depreciation is charged in the tax block for the
  *      year an asset is disposed in this per-asset model.
  *   7. All monetary results are rounded to 2 decimal places.
+ *
+ * UPDATE (Stage 2): the Straight Line Method now follows the days-based convention in
+ * depreciation-engine.ts — annual charge = (cost − residual) ÷ life, charged for the days
+ * held ÷ days in the financial year (366 when 29 Feb falls inside), capped at the residual.
+ * Assumption 2 above therefore applies to WDV only.
  */
+
+import { fyCharge as slmFyCharge, heldDays as slmHeldDays, fyDays as slmFyDays, type BooksAsset } from "@/lib/depreciation-engine";
 
 export type DepreciationMethod = "SLM" | "WDV";
 
@@ -199,19 +206,23 @@ function computeBook(asset: DepreciationAssetInput, fyStartYear: number, cutoff:
     const remainingDepreciable = Math.max(0, openingWdvBook - residual);
 
     let yearDep: number;
-    if (requestedMethod === "SLM") {
-      yearDep = Math.min(remainingDepreciable, slmAnnual * (monthsUsedFullYear / 12));
-    } else {
-      yearDep = Math.min(remainingDepreciable, openingWdvBook * (wdvRate as number) * (monthsUsedFullYear / 12));
-    }
-    yearDep = Math.max(0, yearDep);
-
     let ytdDep: number;
     if (requestedMethod === "SLM") {
-      ytdDep = Math.min(remainingDepreciable, slmAnnual * (monthsUsedToCutoff / 12));
+      const slmAsset: BooksAsset = {
+        id: "", faId: "", description: "", category: "", cost, residual, lifeYears: usefulLife,
+        putToUse: capDate.getTime(), disposal: disposalDate ? disposalDate.getTime() : null,
+      };
+      yearDep = slmFyCharge(slmAsset, fy, openingAccumDep);
+      if (fy === fyStartYear) {
+        const days = slmHeldDays(slmAsset, fyStart.getTime(), Math.floor(cutoff.getTime() / 86400000) * 86400000);
+        ytdDep = Math.min(remainingDepreciable, (slmAnnual * days) / slmFyDays(fy));
+        if (cutoff >= fyEnd) ytdDep = yearDep;
+      } else ytdDep = yearDep;
     } else {
+      yearDep = Math.min(remainingDepreciable, openingWdvBook * (wdvRate as number) * (monthsUsedFullYear / 12));
       ytdDep = Math.min(remainingDepreciable, openingWdvBook * (wdvRate as number) * (monthsUsedToCutoff / 12));
     }
+    yearDep = Math.max(0, yearDep);
     ytdDep = Math.max(0, ytdDep);
 
     if (fy === fyStartYear) {

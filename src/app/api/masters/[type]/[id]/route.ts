@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { requireRole, MANAGEMENT_ROLES, PRIVILEGED_ROLES } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -34,9 +35,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ty
     const session = requireRole(req, MANAGEMENT_ROLES);
     const { type, id } = await params;
     if (!isMasterType(type)) throw unknownMaster(type);
-    const parsed = masterSchema.safeParse(await req.json());
-    if (!parsed.success) return validationError(parsed.error);
+    const body = await req.json();
     const singular = masterSingular[type];
+
+    // R9: a company is deactivated (and can be reactivated) instead of deleted, so existing
+    // employees and assets keep their company; an inactive company drops out of new-record dropdowns.
+    if (body && typeof body === "object" && "active" in body) {
+      if (type !== "company") throw new AppError("Only companies can be deactivated.", { status: 400, code: "VALIDATION_ERROR" });
+      const toggle = z.object({ active: z.boolean({ invalid_type_error: "Choose active or inactive." }) }).safeParse(body);
+      if (!toggle.success) return validationError(toggle.error);
+      const company = await db.$transaction(async (tx) => {
+        const before = await tx.company.findUnique({ where: { id } });
+        if (!before) throw notFound("This company");
+        if (!toggle.data.active && before.active && (await tx.company.count({ where: { active: true, NOT: { id } } })) === 0) {
+          throw new AppError("At least one company must stay active. Add or reactivate another company first.", { status: 409, code: "LAST_ACTIVE_COMPANY" });
+        }
+        const after = await tx.company.update({ where: { id }, data: { active: toggle.data.active } });
+        await audit(
+          {
+            actorId: session.userId,
+            email: session.email,
+            role: session.role,
+            module: "ORGANISATION",
+            recordType: "company",
+            recordId: id,
+            action: toggle.data.active ? "MASTER_ACTIVATED" : "MASTER_DEACTIVATED",
+            previousValue: before,
+            newValue: after,
+          },
+          tx,
+        );
+        return after;
+      });
+      return NextResponse.json({ data: company });
+    }
+
+    const parsed = masterSchema.safeParse(body);
+    if (!parsed.success) return validationError(parsed.error);
 
     const result = await db.$transaction(
       async (tx) => {

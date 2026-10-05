@@ -18,6 +18,7 @@ const MANAGEMENT_NAV: NavItem[] = [
   { label: "Asset Register", href: "/assets" },
   { label: "Transfers", href: "/transfers" },
   { label: "Master Data", href: "/masters" },
+  { label: "Depreciation Setup", href: "/depreciation-setup" },
   { label: "Import / Export", href: "/imports" },
   { label: "Audit Logs", href: "/audit" },
 ];
@@ -49,7 +50,11 @@ function ShellFrame({ user, children }: { user: SessionUser; children: ReactNode
   const [signingOut, setSigningOut] = useState(false);
   const leaving = useRef(false);
   const management = user.portal === "management";
-  const nav = management ? MANAGEMENT_NAV : EMPLOYEE_NAV;
+  const nav = management
+    ? user.canManageLogins
+      ? [...MANAGEMENT_NAV, { label: "Logins", href: "/users" }]
+      : MANAGEMENT_NAV
+    : EMPLOYEE_NAV;
   const loginUrl = management ? "/login" : "/employee/login";
 
   const leave = useCallback(

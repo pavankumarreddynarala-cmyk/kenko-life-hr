@@ -91,6 +91,21 @@ export function describeAudit(log: AuditLike, transfers?: Map<string, TransferLo
     }
   }
 
+  if (action === "CATEGORY_CREATED" || action === "CATEGORY_UPDATED") {
+    const name = str(rec(log.newValue).name) ?? log.recordId;
+    return line(`${action === "CATEGORY_CREATED" ? "added" : "updated"} depreciation category “${name}”`);
+  }
+  if (action === "TAX_BLOCK_CREATED" || action === "TAX_BLOCK_UPDATED") {
+    const name = str(rec(log.newValue).name) ?? log.recordId;
+    return line(`${action === "TAX_BLOCK_CREATED" ? "added" : "updated"} income-tax block “${name}”`);
+  }
+  if (action === "YEAR_ADDED") return line("added a financial year to the depreciation list");
+  if (action === "LOGIN_CREATED") return line(`created a login for ${log.recordId}`, "success");
+  if (action === "LOGIN_PASSWORD_RESET") return line(`reset the password for ${log.recordId}`, "warning");
+  if (action === "MASTER_ACTIVATED" || action === "MASTER_DEACTIVATED") {
+    return line(`${action === "MASTER_ACTIVATED" ? "activated" : "deactivated"} ${masterSubject(log)}`, action === "MASTER_ACTIVATED" ? "success" : "warning");
+  }
+
   if (recordType === "Employee") {
     const subject = employeeSubject(log);
     switch (action) {

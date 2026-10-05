@@ -11,6 +11,8 @@ export type SessionUser = {
   portal: "management" | "employee";
   permissions: Permissions;
   employeeCode?: string;
+  /** R1: true only for the main administrator account (creates and resets logins). */
+  canManageLogins?: boolean;
 };
 
 const SessionContext = createContext<SessionUser | null>(null);

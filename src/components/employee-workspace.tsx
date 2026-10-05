@@ -8,6 +8,7 @@ import { Field, inputClass, Modal, RequiredLegend } from "@/components/form";
 import { useToast } from "@/components/toast";
 import { fieldErrorMap, jsonBody, requestJson } from "@/lib/client-api";
 import { requiredErrors, type FormErrors } from "@/lib/form-validation";
+import { ScanQrButton } from "@/components/qr-scanner";
 import { EMPLOYEE_TABS, type EmployeeTabKey } from "@/lib/employee-tabs";
 
 type MasterItem = { id: string; name: string; code: string };
@@ -343,9 +344,12 @@ export function EmployeeWorkspace({ tab: active }: { tab: EmployeeTabKey }) {
       )}
 
       {active === "assets" && (
-        <section className="card overflow-hidden p-0">
-          <FilterableTable rows={assetRows} columns={assetColumns} emptyMessage="No assets are currently assigned to you." />
-        </section>
+        <>
+          <div className="mb-3 flex justify-end"><ScanQrButton /></div>
+          <section className="card overflow-hidden p-0">
+            <FilterableTable rows={assetRows} columns={assetColumns} emptyMessage="No assets are currently assigned to you." />
+          </section>
+        </>
       )}
 
       {active === "requests" && (

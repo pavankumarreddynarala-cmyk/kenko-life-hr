@@ -1,35 +1,27 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { readSessionToken, MANAGEMENT_ROLES } from "@/lib/auth";
+import { readSessionToken } from "@/lib/auth";
+import { loadAssetForScan, tokenFromScan, viewerFor } from "@/lib/asset-view";
 
-function display(value: unknown) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (value instanceof Date) return value.toLocaleDateString("en-IN");
-  return String(value);
-}
+export const dynamic = "force-dynamic"; // always the live record
 
-// QR access is role- and ownership-gated, enforced here on the server for every request:
-// - Unauthenticated visitors: denied outright (no asset data of any kind).
-// - Management roles (ADMIN/CEO/COO/HR/CFO): full asset record.
-// - Employees: only the restricted, non-financial field set, and only for an asset
-//   currently assigned to them. Scanning another employee's asset QR is denied.
+// Opened when a QR code is read by a phone's own camera app (the in-portal scanner uses /api/qr-scan).
+// Admin, CEO and COO see every group; everyone else signed in sees Group 1, Group 2 and the custodian. No session, no data.
 export default async function AssetQrPage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = await params;
+  const { token: raw } = await params;
+  const token = tokenFromScan(raw);
+  if (!token) return notFound();
   const cookieStore = await cookies();
   const session = readSessionToken(cookieStore.get("kenko_session")?.value);
-
   if (!session) {
     return (
-      <main className="min-h-screen bg-kenko-cream p-5">
-        <section className="card mx-auto my-10 max-w-lg text-center">
+      <main className="flex min-h-screen items-center justify-center bg-kenko-cream p-4">
+        <section className="card w-full max-w-md text-center">
           <p className="text-xs font-bold tracking-widest text-kenko-green">THE KENKO LIFE · ASSET REGISTER</p>
-          <h1 className="mt-3 text-2xl font-bold">Sign in to view this asset</h1>
-          <p className="mt-2 text-sm text-stone-500">
-            This QR code only shows asset details to signed-in staff or the employee it is assigned to.
-          </p>
-          <div className="mt-5 flex justify-center gap-3">
+          <h1 className="mt-2 text-2xl font-bold">Sign in to view this asset</h1>
+          <p className="mt-2 text-sm text-stone-500">Asset details are shown only to signed-in staff.</p>
+          <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Link className="btn-primary" href="/login">Management sign in</Link>
             <Link className="btn" href="/employee/login">Employee sign in</Link>
           </div>
@@ -37,129 +29,52 @@ export default async function AssetQrPage({ params }: { params: Promise<{ token:
       </main>
     );
   }
-
-  const isManagement = MANAGEMENT_ROLES.includes(session.role);
-  const qr = await db.assetQRCode.findUnique({
-    where: { token },
-    include: {
-      asset: {
-        include: {
-          company: true,
-          location: true,
-          department: true,
-          costCentre: true,
-          assignments: {
-            where: { returnedAt: null },
-            include: { employee: { select: { id: true, permanentId: true, name: true } } },
-            take: 1,
-          },
-        },
-      },
-    },
-  });
-  if (!qr) return notFound();
-  const asset = qr.asset;
-  if (asset.deletedAt) {
-    // A deleted asset is invisible to everyone except management, who see why it was removed.
-    if (!isManagement) return notFound();
+  const data = await loadAssetForScan(token, viewerFor(session.role));
+  if (!data) return notFound();
+  if (data.deleted) {
     return (
-      <main className="min-h-screen bg-kenko-cream p-5">
-        <section className="card mx-auto my-10 max-w-lg text-center">
+      <main className="flex min-h-screen items-center justify-center bg-kenko-cream p-4">
+        <section className="card w-full max-w-md text-center">
           <p className="text-xs font-bold tracking-widest text-red-700">DELETED ASSET</p>
-          <h1 className="mt-3 text-2xl font-bold">{asset.faId} was deleted from the register</h1>
-          <p className="mt-2 text-sm text-stone-500">
-            Deleted {display(asset.deletedAt)} by {asset.deletedByEmail ?? "an administrator"}.
-            {asset.deleteReason ? ` Reason: ${asset.deleteReason}.` : ""} An Admin, CEO or COO can restore it from the
-            Asset Register&apos;s deleted list.
-          </p>
+          <h1 className="mt-2 text-2xl font-bold">{data.groups[0]?.fields.find((f) => f.label === "Asset ID")?.value} was deleted from the register</h1>
+          <p className="mt-2 text-sm text-stone-500">An Admin, CEO or COO can restore it from the Asset Register&apos;s deleted list.</p>
         </section>
       </main>
     );
   }
-  const custodian = asset.assignments[0]?.employee;
-  const isAssignedEmployee = session.role === "EMPLOYEE" && custodian?.id === session.employeeId;
-
-  if (!isManagement && !isAssignedEmployee) {
-    return (
-      <main className="min-h-screen bg-kenko-cream p-5">
-        <section className="card mx-auto my-10 max-w-lg text-center">
-          <p className="text-xs font-bold tracking-widest text-kenko-orange">ACCESS DENIED</p>
-          <h1 className="mt-3 text-2xl font-bold">This asset isn&apos;t assigned to you</h1>
-          <p className="mt-2 text-sm text-stone-500">
-            Only the employee this asset is currently assigned to, or an authorized manager, can view its details.
-          </p>
-        </section>
-      </main>
-    );
-  }
-
-  const employeeDetails: [string, unknown][] = [
-    ["Asset ID", asset.faId],
-    ["Category", asset.category],
-    ["Description", asset.description],
-    ["Model", asset.makeModel],
-    ["Vendor Name", asset.vendorName],
-    ["Invoice Number", asset.invoiceNo],
-    ["Invoice Date", asset.invoiceDate],
-    ["Purchase Date", asset.capitalisationDate],
-  ];
-  const managementDetails: [string, unknown][] = [
-    ["Asset ID", asset.faId],
-    ["Category", asset.category],
-    ["Description", asset.description],
-    ["Make / model", asset.makeModel],
-    ["Serial number", asset.serialNo],
-    ["Status", asset.status],
-    ["Last updated", asset.updatedAt],
-    ["Company", asset.company?.name],
-    ["Location", asset.location?.name],
-    ["Department", asset.department?.name],
-    ["Cost centre", asset.costCentre?.name],
-    ["Custodian", custodian ? `${custodian.permanentId} · ${custodian.name}` : asset.assignments[0]?.custodianName],
-    ["Vendor", asset.vendorName],
-    ["Invoice number", asset.invoiceNo],
-    ["Invoice date", asset.invoiceDate],
-    ["Capitalisation date", asset.capitalisationDate],
-    ["PO / GRN", asset.poGrnNo],
-    ["Purchase cost", asset.purchaseCost],
-    ["Freight", asset.freight],
-    ["Installation cost", asset.installationCost],
-    ["Other cost", asset.otherCost],
-    ["Total capitalised cost", asset.totalCapitalisedCost],
-    ["GST amount", asset.gstAmount],
-    ["ITC eligible", asset.itcEligible ? "Yes" : "No"],
-    ["ITC availed", asset.itcAvailed],
-    ["Depreciation method", asset.depreciationMethod],
-    ["Useful life", asset.usefulLife],
-    ["Residual value", asset.residualValue],
-    ["Net book value", asset.netBookValue],
-    ["Tax block", asset.taxBlock],
-    ["Closing WDV", asset.closingWdv],
-    ["Disposal date", asset.disposalDate],
-    ["Disposal reason", asset.disposalReason],
-    ["Disposal remarks", asset.disposalRemarks],
-    ["Sale proceeds", asset.saleProceeds],
-    ["Verification date", asset.verificationDate],
-    ["Verification status", asset.verificationStatus],
-  ];
-  const details = isManagement ? managementDetails : employeeDetails;
-
+  const faId = data.groups[0]?.fields.find((f) => f.label === "Asset ID")?.value;
   return (
-    <main className="min-h-screen bg-kenko-cream p-5">
-      <section className="card mx-auto my-10 max-w-4xl">
+    <main className="min-h-screen bg-kenko-cream p-3 sm:p-5">
+      <section className="card mx-auto my-4 max-w-4xl sm:my-10">
         <p className="text-xs font-bold tracking-widest text-kenko-green">THE KENKO LIFE · ASSET REGISTER</p>
-        <h1 className="mt-2 text-3xl font-bold">{asset.faId}</h1>
-        <p className="mt-1 text-sm text-stone-500">
-          {isManagement ? "Authoritative asset details from the live register." : "Details for the asset assigned to you."}
-        </p>
-        <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {details.map(([label, value]) => (
-            <div className="rounded-xl bg-stone-50 p-3" key={label}>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
-              <dd className="mt-1 break-words text-sm font-medium">{display(value)}</dd>
-            </div>
-          ))}
-        </dl>
+        <h1 className="mt-2 break-words text-2xl font-bold sm:text-3xl">{faId}</h1>
+        <p className="mt-1 text-sm text-stone-500">Live record, last updated {new Date(data.updatedAt).toLocaleString("en-IN")}{data.status ? ` · ${data.status}` : ""}</p>
+        {data.groups.map((group) => (
+          <div className="mt-6" key={group.id}>
+            <h2 className="mb-2 text-sm font-bold text-kenko-green">{group.title}</h2>
+            <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {group.fields.map((field) => (
+                <div className="rounded-xl bg-stone-50 p-3" key={field.label}>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">{field.label}</dt>
+                  <dd className="mt-1 break-words text-sm font-medium">{field.value ?? "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+        <div className="mt-6">
+          <h2 className="mb-2 text-sm font-bold text-kenko-green">Custodian · whose asset it is</h2>
+          {data.custodian ? (
+            <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-xl bg-stone-50 p-3"><dt className="text-xs font-semibold uppercase text-stone-500">Name</dt><dd className="mt-1 text-sm font-medium">{data.custodian.name ?? "—"}</dd></div>
+              <div className="rounded-xl bg-stone-50 p-3"><dt className="text-xs font-semibold uppercase text-stone-500">Employee code</dt><dd className="mt-1 text-sm font-medium">{data.custodian.code ?? data.custodian.type}</dd></div>
+              <div className="rounded-xl bg-stone-50 p-3"><dt className="text-xs font-semibold uppercase text-stone-500">Held since</dt><dd className="mt-1 text-sm font-medium">{data.custodian.since}</dd></div>
+            </dl>
+          ) : (
+            <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">Not assigned to anyone.</p>
+          )}
+        </div>
+        {data.viewer === "LIMITED" && <p className="mt-6 rounded-lg bg-orange-50 p-3 text-sm text-orange-900">Cost, depreciation and other financial details are available to the Admin, CEO and COO only.</p>}
       </section>
     </main>
   );

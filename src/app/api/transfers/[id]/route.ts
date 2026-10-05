@@ -94,7 +94,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
         const receiver = parsed.data.receiverEmployeeCode
           ? await tx.employee.findUnique({ where: { permanentId: parsed.data.receiverEmployeeCode } })
-          : before.receiver;
+          : await tx.employee.findUnique({ where: { id: before.receiverId } });
         if (!receiver || receiver.deletedAt) {
           throw new AppError(
             `Receiving Employee ID: no active employee has the ID ${parsed.data.receiverEmployeeCode}. Check the ID in the Employee Master.`,

@@ -57,7 +57,7 @@ describe("actionable validation messages", () => {
 
   it("gives PAN and Aadhaar format guidance", () => {
     const issues = issuesFor(employeeAdminSchema, { name: "Asha Rao", phone: "9876543210", pan: "abc", aadhaar: "1234" });
-    expect(issues.find((issue) => issue.field === "pan")?.message).toMatch(/ABCDE1234F/);
+    expect(issues.find((issue) => issue.field === "pan")?.message).toMatch(/ABCPD1234E/);
     expect(issues.find((issue) => issue.field === "aadhaar")?.message).toMatch(/12-digit/);
   });
 
