@@ -14,6 +14,9 @@ export type ImportColumn = {
 // headers are generated from this list, and the importer parses uploads against the
 // same list, so the two can never drift apart.
 export const employeeImportColumns: ImportColumn[] = [
+  // Optional. When filled, the importer keeps this exact Employee Code; when blank, the next
+  // free code is assigned automatically (same as adding an employee in the portal).
+  { header: "Employee Code", field: "permanentId", kind: "text" },
   { header: "Name as per PAN", field: "name", kind: "text" },
   { header: "Team Office Code", field: "teamOfficeCode", kind: "text" },
   { header: "Mobile Number", field: "phone", kind: "text" },
@@ -143,6 +146,8 @@ function coerceCell(column: ImportColumn, raw: unknown, rowNumber: number, error
   }
 }
 
+const label = (field: string) => (field === "permanentId" ? "Employee Code" : field);
+
 export type ValidationResult<T> = { validRows: T[]; errors: RowError[]; totalRows: number };
 
 /**
@@ -164,7 +169,7 @@ export async function validateImportRows(
   const mapped: Record<string, unknown>[] = [];
   const seenWithinFile = new Set<string>();
 
-  const dedupeField = type === "employees" ? ["phone", "email"] : ["faId"];
+  const dedupeField = type === "employees" ? ["permanentId", "phone", "email"] : ["faId"];
   const dedupeCandidates: string[] = [];
 
   rows.forEach((row, index) => {
@@ -186,6 +191,16 @@ export async function validateImportRows(
       if (value !== undefined) data[column.field] = value;
     }
 
+    // Employee Code is not part of the form schema (the portal assigns it), so check it here.
+    let employeeCode: string | undefined;
+    if (type === "employees" && data.permanentId !== undefined) {
+      employeeCode = String(data.permanentId).trim().toUpperCase().replace(/\s+/g, "");
+      if (!/^[A-Z0-9][A-Z0-9_-]{1,29}$/.test(employeeCode)) {
+        errors.push({ rowNumber, field: "Employee Code", message: `"${data.permanentId}" is not a valid Employee Code. Use letters, digits, - or _ (for example EMP0123), or leave it blank to auto-assign.`, raw: data.permanentId });
+        return;
+      }
+    }
+    delete data.permanentId;
     const schema = type === "employees" ? employeeAdminSchema : assetSchema;
     const parsed = schema.safeParse(data);
     if (!parsed.success) {
@@ -199,6 +214,7 @@ export async function validateImportRows(
     // normalized to +91XXXXXXXXXX) so two differently-formatted entries for the same
     // person/asset are still caught.
     const validated = parsed.data as Record<string, unknown>;
+    if (employeeCode) validated.permanentId = employeeCode;
     if (type === "assets") {
       const itc = itcIssue(validated);
       if (itc) {
@@ -212,7 +228,7 @@ export async function validateImportRows(
       if (!value) continue;
       const dedupeKey = `${field}:${value}`;
       if (seenWithinFile.has(dedupeKey)) {
-        errors.push({ rowNumber, field, message: `Duplicate ${field} "${validated[field]}" also appears earlier in this file`, raw: validated[field] });
+        errors.push({ rowNumber, field, message: `Duplicate ${label(field)} "${validated[field]}" also appears earlier in this file`, raw: validated[field] });
         duplicateWithinFile = true;
       } else {
         seenWithinFile.add(dedupeKey);
@@ -232,7 +248,7 @@ export async function validateImportRows(
       if (!value) continue;
       const key = `${field}:${value}`;
       if (existingDuplicates.has(key)) {
-        errors.push({ rowNumber, field, message: `${field} "${row[field]}" already exists in the database`, raw: row[field] });
+        errors.push({ rowNumber, field, message: `${label(field)} "${row[field]}" already exists in the database`, raw: row[field] });
         return false;
       }
     }
