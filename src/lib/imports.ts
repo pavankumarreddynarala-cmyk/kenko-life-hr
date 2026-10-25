@@ -112,8 +112,17 @@ function coerceCell(column: ImportColumn, raw: unknown, rowNumber: number, error
     case "text":
       return String(value);
     case "date": {
-      const parsed = value instanceof Date ? value : new Date(String(value));
-      if (Number.isNaN(parsed.getTime())) {
+      // Excel stores real dates as serial numbers (e.g. 33440 = 21 Jul 1991). Reading those as
+      // text would give year 33440, so convert them explicitly.
+      const parsed =
+        value instanceof Date
+          ? value
+          : typeof value === "number"
+            ? new Date(Date.UTC(1899, 11, 30) + Math.round(value) * 86_400_000)
+            : /^\d{5}$/.test(String(value))
+              ? new Date(Date.UTC(1899, 11, 30) + Number(value) * 86_400_000)
+              : new Date(String(value));
+      if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() < 1900 || parsed.getUTCFullYear() > 2100) {
         errors.push({ rowNumber, field: column.header, message: `"${value}" is not a valid date`, raw: value });
         return undefined;
       }
