@@ -44,6 +44,7 @@ export const employeeImportColumns: ImportColumn[] = [
   { header: "Cost Centre Code", field: "costCentreId", kind: "masterCode", master: "costCentre" },
   { header: "Date of Joining", field: "joiningDate", kind: "date" },
   { header: "Employment Status (ACTIVE/ON_LEAVE/EXITED)", field: "status", kind: "text" },
+  { header: "Last Day of Working", field: "exitDate", kind: "date" },
 ];
 
 export const assetImportColumns: ImportColumn[] = [
