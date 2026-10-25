@@ -29,7 +29,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bat
         if (batch.type === "employees") {
           await db.$transaction(
             async (tx) => {
-              const permanentId = await allocateEmployeeCode(tx);
+              // A code supplied in the file is kept as is; otherwise the next free code is assigned.
+              const supplied = (data as { permanentId?: string }).permanentId;
+              const permanentId = supplied ?? (await allocateEmployeeCode(tx));
               const created = await tx.employee.create({ data: { ...(data as Record<string, unknown>), permanentId } as never });
               await refreshDynamicEmployeeCode(tx, created.id);
               const after = await tx.employee.findUniqueOrThrow({ where: { id: created.id }, include: employeeInclude });

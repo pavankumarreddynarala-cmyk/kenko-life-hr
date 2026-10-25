@@ -8,19 +8,22 @@ import { apiError } from "@/lib/api-error";
 async function checkDuplicates(type: "employees" | "assets", candidates: string[]): Promise<Set<string>> {
   if (!candidates.length) return new Set();
   if (type === "employees") {
+    const codes = candidates.filter((c) => c.startsWith("permanentId:")).map((c) => c.slice("permanentId:".length).toUpperCase());
     const phones = candidates.filter((c) => c.startsWith("phone:")).map((c) => c.slice("phone:".length));
     const emails = candidates.filter((c) => c.startsWith("email:")).map((c) => c.slice("email:".length));
     const found = await db.employee.findMany({
       where: {
         OR: [
+          ...(codes.length ? [{ permanentId: { in: codes } }] : []),
           ...(phones.length ? [{ phone: { in: phones } }] : []),
           ...(emails.length ? [{ email: { in: emails, mode: "insensitive" as const } }] : []),
         ],
       },
-      select: { phone: true, email: true },
+      select: { permanentId: true, phone: true, email: true },
     });
     const set = new Set<string>();
     for (const row of found) {
+      if (codes.includes(row.permanentId.toUpperCase())) set.add(`permanentId:${row.permanentId.toLowerCase()}`);
       if (row.phone && phones.includes(row.phone)) set.add(`phone:${row.phone.toLowerCase()}`);
       if (row.email && emails.includes(row.email.toLowerCase())) set.add(`email:${row.email.toLowerCase()}`);
     }
